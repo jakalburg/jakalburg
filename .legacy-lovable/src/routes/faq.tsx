@@ -1,0 +1,43 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { SiteLayout } from "@/components/layout/SiteLayout";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { faqs } from "@/data/faqs";
+
+export const Route = createFileRoute("/faq")({
+  head: () => ({
+    meta: [
+      { title: "Help & FAQ — Jakalburg" },
+      { name: "description", content: "Frequently asked questions about orders, shipping, returns, sizing and care." },
+      { property: "og:title", content: "Help & FAQ — Jakalburg" },
+      { property: "og:url", content: "/faq" },
+    ],
+    links: [{ rel: "canonical", href: "/faq" }],
+  }),
+  component: FaqPage,
+});
+
+function FaqPage() {
+  return (
+    <SiteLayout>
+      <section className="container-vh py-16">
+        <p className="eyebrow text-mute-text">Help</p>
+        <h1 className="mt-3 text-3xl md:text-4xl">Frequently asked.</h1>
+        <div className="mt-10 grid gap-10 md:grid-cols-2">
+          {faqs.map((section) => (
+            <div key={section.section}>
+              <h2 className="mb-4 text-lg">{section.section}</h2>
+              <Accordion type="single" collapsible>
+                {section.items.map((f, i) => (
+                  <AccordionItem key={i} value={`${section.section}-${i}`}>
+                    <AccordionTrigger>{f.question}</AccordionTrigger>
+                    <AccordionContent>{f.answer}</AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            </div>
+          ))}
+        </div>
+      </section>
+    </SiteLayout>
+  );
+}

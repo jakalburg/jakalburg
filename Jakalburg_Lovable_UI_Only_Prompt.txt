@@ -1,0 +1,1807 @@
+Build a complete, production-quality, responsive frontend UI for a fashion e-commerce website named:
+
+VIMUHET
+
+Vimuhet is a modern clothing brand selling premium everyday fashion for men and women.
+
+Before writing any code, read the attached `DESIGN.md` file completely and treat it as the primary design-system reference.
+
+Use its:
+
+- Layout structure
+- Editorial visual hierarchy
+- Typography scale
+- Spacing system
+- Product-card structure
+- Responsive behaviour
+- Header and mega-menu patterns
+- Search overlay
+- Cart drawer
+- Product listing layout
+- Product details layout
+- Account and order page recommendations
+- Accessibility rules
+- Loading, empty and error states
+- Design tokens
+- Reusable component principles
+
+IMPORTANT: THIS PHASE IS FRONTEND UI ONLY.
+
+Do not connect or create:
+
+- Supabase
+- Firebase
+- Any database
+- Any backend
+- Server-side APIs
+- Real authentication
+- Real protected routes
+- Cloud storage
+- Edge Functions
+- Database migrations
+- Row Level Security policies
+- Email services
+- Payment gateways
+- Real payment processing
+- Real checkout processing
+- Real order processing
+- Real inventory processing
+- Real customer accounts
+- Environment secrets
+- Service-role keys
+- Database passwords
+- External production credentials
+
+Use static mock data, frontend state and local storage only.
+
+The result should be a polished, fully navigable, responsive e-commerce UI prototype that can be connected to a backend later without redesigning the interface.
+
+Do not create an exact copy of the source website mentioned in `DESIGN.md`.
+
+Do not copy:
+
+- Logos
+- Brand names
+- Text
+- Product names
+- Product photography
+- Campaign images
+- Copyrighted graphics
+- Source code
+- Athlete imagery
+- Proprietary assets
+
+Adapt the design language into an original Vimuhet clothing website.
+
+# 1. Brand identity
+
+Brand name:
+
+VIMUHET
+
+Brand positioning:
+
+Vimuhet is a premium but accessible contemporary clothing brand focused on clean silhouettes, elevated basics, comfortable fabrics and versatile everyday fashion.
+
+Brand personality:
+
+- Modern
+- Confident
+- Minimal
+- Premium
+- Editorial
+- Fashion-forward
+- Inclusive
+- Clean
+- Youthful without appearing childish
+
+Brand tagline:
+
+“Made for Every Version of You.”
+
+Alternative campaign lines that may be used:
+
+- Everyday, Elevated.
+- Designed to Move With You.
+- Modern Essentials. Effortless Style.
+- Wear Your Moment.
+- Crafted for the Way You Live.
+
+Do not mention one8 anywhere on the website.
+
+# 2. Visual direction
+
+Follow the uploaded `DESIGN.md`, but adapt its performance-sports feeling into a premium clothing and lifestyle aesthetic.
+
+The interface should use:
+
+- Large editorial fashion photography
+- Strong black-and-white contrast
+- Clean sans-serif typography
+- Wide desktop layouts
+- Generous whitespace
+- Square or minimally rounded components
+- Thin borders instead of heavy shadows
+- Short, confident headlines
+- Large product imagery
+- Minimal decorative elements
+- Smooth but controlled interactions
+
+Avoid:
+
+- Glassmorphism
+- Excessive gradients
+- Large rounded cards
+- Bright random colours
+- Heavy shadows
+- Marketplace-style clutter
+- Overcrowded navigation
+- Cartoon-like icons
+- Unnecessary animations
+
+# 3. Vimuhet colour palette
+
+Use the following Vimuhet theme while remaining consistent with the attached design system:
+
+```css
+:root {
+  --color-black: #090909;
+  --color-ink: #171717;
+  --color-charcoal: #292929;
+
+  --color-white: #ffffff;
+  --color-ivory: #faf8f3;
+  --color-stone: #f1eee8;
+  --color-soft-grey: #eeeeeb;
+
+  --color-border: #d9d6cf;
+  --color-border-dark: #a6a29a;
+
+  --color-text-primary: #171717;
+  --color-text-secondary: #66635e;
+  --color-text-muted: #8b8881;
+
+  --color-accent: #8b5e3c;
+  --color-accent-dark: #67432b;
+  --color-accent-light: #eee1d6;
+
+  --color-success: #167a45;
+  --color-success-bg: #e9f5ee;
+  --color-warning: #8a5a00;
+  --color-warning-bg: #fff3d6;
+  --color-error: #b42318;
+  --color-error-bg: #fdecec;
+  --color-info: #1d4e89;
+  --color-info-bg: #eaf2fb;
+
+  --color-overlay: rgba(0, 0, 0, 0.55);
+}
+```
+
+Colour rules:
+
+- Black is the primary action colour.
+- White and ivory are the main surfaces.
+- Stone may be used behind product imagery and editorial sections.
+- Brown should be used sparingly as Vimuhet’s signature accent.
+- Product photography should provide most of the colour.
+- Do not colour every icon, badge or section.
+
+# 4. Typography
+
+Use a clean modern sans-serif font.
+
+Preferred public fonts:
+
+- Inter
+- Manrope
+- DM Sans
+
+Use Manrope as the main recommendation:
+
+```css
+--font-sans: "Manrope", "Helvetica Neue", Arial, sans-serif;
+```
+
+Typography direction:
+
+- Strong editorial display headings
+- Tight heading letter spacing
+- Clean body text
+- Compact product metadata
+- Medium rather than extremely bold weights
+- No decorative script fonts
+
+Suggested hierarchy:
+
+- Hero heading: 56–72px desktop, 38–48px mobile
+- Page title: 44–56px desktop, 32–40px mobile
+- Section heading: 32–42px desktop, 26–32px mobile
+- Product title: 30–40px desktop, 26–32px mobile
+- Product-card title: 14–17px
+- Body: 15–17px
+- Labels: 11–13px
+- Buttons: 14–16px
+
+Use:
+
+```css
+overflow-wrap: break-word;
+word-break: normal;
+```
+
+Never use:
+
+```css
+word-break: break-all;
+```
+
+# 5. Technical stack
+
+Build the frontend using Lovable’s recommended modern stack:
+
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- shadcn/ui only where suitable
+- React Router
+- Lucide icons
+- React Context or Zustand for UI state
+- Local storage only for optional demo persistence
+
+Do not use Supabase or any other backend service.
+
+Use:
+
+- Static TypeScript product data
+- Static category and collection data
+- Static mock customer data
+- Static mock order data
+- Frontend cart state
+- Frontend wishlist state
+- Frontend checkout state
+- Client-side form validation
+- Client-side route navigation
+- Local storage for cart, wishlist, recently viewed items and mock session state where useful
+
+Use reusable components and clean folder organisation.
+
+Do not build the entire interface inside one component.
+
+Suggested structure:
+
+```text
+src/
+  components/
+    common/
+    layout/
+    navigation/
+    product/
+    collection/
+    cart/
+    checkout/
+    account/
+    order/
+    forms/
+    feedback/
+
+  pages/
+    HomePage
+    CollectionPage
+    ProductPage
+    SearchPage
+    CartPage
+    CheckoutPage
+    LoginPage
+    SignupPage
+    ForgotPasswordPage
+    ResetPasswordPage
+    AccountPage
+    OrdersPage
+    OrderDetailsPage
+    AddressesPage
+    ProfilePage
+    WishlistPage
+    OrderConfirmationPage
+    AboutPage
+    ContactPage
+    FAQPage
+    ShippingPolicyPage
+    ReturnsPolicyPage
+    PrivacyPolicyPage
+    TermsPage
+    NotFoundPage
+
+  context/
+  stores/
+  hooks/
+  lib/
+  types/
+  data/
+  styles/
+```
+
+Do not create backend service files, database clients, API clients or server code.
+
+# 6. Global website structure
+
+Every public page should include:
+
+1. Announcement bar
+2. Main header
+3. Desktop navigation or mobile navigation
+4. Main page content
+5. Newsletter section
+6. Footer
+
+Create the following announcement messages:
+
+- Free shipping across India on orders above ₹1,499
+- Easy 7-day returns and exchanges
+- Secure payments and cash on delivery available
+
+These are UI demonstration messages only. Do not connect them to real shipping or payment services.
+
+Display one at a time or use a slow accessible marquee.
+
+Pause animation on hover and respect reduced-motion preferences.
+
+# 7. Header and navigation
+
+Create a premium responsive header.
+
+Desktop layout:
+
+- Left: main navigation
+- Centre: VIMUHET wordmark
+- Right:
+  - Search
+  - Account
+  - Wishlist
+  - Shopping bag with count
+
+Main navigation:
+
+- New Arrivals
+- Women
+- Men
+- Collections
+- Essentials
+- Sale
+
+Mega-menu categories:
+
+Women:
+
+- Tops
+- T-Shirts
+- Shirts
+- Dresses
+- Co-ord Sets
+- Trousers
+- Jeans
+- Skirts
+- Jackets
+- Knitwear
+
+Men:
+
+- T-Shirts
+- Shirts
+- Polos
+- Trousers
+- Jeans
+- Overshirts
+- Jackets
+- Knitwear
+- Shorts
+
+Collections:
+
+- Everyday Essentials
+- Weekend Edit
+- Workwear
+- Minimal Monochrome
+- Summer Linen
+- Street Edit
+
+Include two or three editorial image cards in desktop mega menus.
+
+On mobile:
+
+- Use a full-height navigation drawer
+- Provide nested category navigation
+- Include clear back and close buttons
+- Put account, wishlist, contact and order links near the bottom
+- Prevent background scrolling
+- Keep inactive navigation inaccessible to keyboard and screen readers
+
+All navigation links must route to working frontend pages or filtered collection views.
+
+# 8. Homepage
+
+Create a polished editorial homepage with this order:
+
+## Section 1: Hero
+
+Full-width fashion campaign image.
+
+Content:
+
+Eyebrow:
+
+VIMUHET / NEW SEASON
+
+Heading:
+
+Made for Every Version of You.
+
+Supporting text:
+
+Modern clothing designed for movement, comfort and effortless everyday style.
+
+Buttons:
+
+- Shop Women
+- Shop Men
+
+Desktop:
+
+- Use a large landscape hero
+- Text may overlay the image if contrast is sufficient
+- Hero height approximately 75–90vh
+
+Mobile:
+
+- Use a separate portrait crop
+- Keep buttons easy to tap
+- Do not allow important subjects to be cropped incorrectly
+
+## Section 2: Service benefits
+
+Three or four compact benefits:
+
+- Free Shipping Above ₹1,499
+- Easy 7-Day Returns
+- Secure Payments
+- Quality Fabrics
+
+Use monochrome outline icons.
+
+## Section 3: New Arrivals
+
+Display eight products using reusable product cards.
+
+Include:
+
+- Product image
+- Category
+- Product name
+- Regular price
+- Sale price where applicable
+- New or Bestseller badge
+- Wishlist button
+- Add to Bag action
+
+Add a “View All New Arrivals” action.
+
+## Section 4: Shop by Category
+
+Large editorial category cards:
+
+- Dresses
+- Shirts
+- T-Shirts
+- Trousers
+- Co-ord Sets
+- Jackets
+
+Use fashion photography with category names and simple explore links.
+
+## Section 5: Women’s editorial campaign
+
+Heading:
+
+Quiet Confidence
+
+Text:
+
+Refined silhouettes and versatile pieces designed for every part of your day.
+
+Button:
+
+Explore Women
+
+## Section 6: Men’s editorial campaign
+
+Heading:
+
+Modern Foundations
+
+Text:
+
+Clean cuts, considered fabrics and everyday pieces built to last.
+
+Button:
+
+Explore Men
+
+## Section 7: Trending Now
+
+Create a horizontal or responsive product grid.
+
+## Section 8: Vimuhet Essentials
+
+Promote:
+
+- Premium Cotton T-Shirts
+- Relaxed Shirts
+- Tailored Trousers
+- Everyday Dresses
+
+## Section 9: Brand story strip
+
+Heading:
+
+Designed With Intention
+
+Text:
+
+At Vimuhet, we create versatile clothing that balances comfort, quality and modern design.
+
+Link:
+
+Our Story
+
+## Section 10: Newsletter
+
+Heading:
+
+Join the Vimuhet Edit
+
+Text:
+
+Sign up for new drops, private offers and styling inspiration.
+
+Include:
+
+- Email input
+- Join button
+- Privacy consent text
+- Client-side validation
+- Loading state
+- Success state
+- Error state
+
+Submitting the newsletter form should only simulate success in the frontend. Do not store or send the email address anywhere.
+
+## Section 11: Footer
+
+Use the footer requirements below.
+
+# 9. Product data
+
+Create realistic static demo products for Vimuhet.
+
+Use at least 24 products covering:
+
+Women:
+
+- Dresses
+- Tops
+- Shirts
+- Trousers
+- Jeans
+- Co-ord sets
+- Jackets
+
+Men:
+
+- T-Shirts
+- Shirts
+- Polos
+- Trousers
+- Jeans
+- Overshirts
+- Jackets
+
+Each product should contain:
+
+```ts
+{
+  id,
+  slug,
+  name,
+  category,
+  gender,
+  collection,
+  description,
+  shortDescription,
+  regularPrice,
+  salePrice,
+  currency,
+  colours,
+  sizes,
+  images,
+  stock,
+  sku,
+  fabric,
+  fit,
+  careInstructions,
+  details,
+  badges,
+  isNew,
+  isFeatured,
+  isBestseller
+}
+```
+
+Keep this data inside TypeScript files under `src/data`.
+
+Use INR pricing.
+
+Suggested range:
+
+- T-Shirts: ₹899–₹1,799
+- Shirts: ₹1,499–₹2,999
+- Dresses: ₹1,799–₹4,499
+- Trousers: ₹1,699–₹3,499
+- Jackets: ₹2,999–₹6,999
+- Co-ord sets: ₹2,499–₹5,999
+
+Do not use real fashion-brand names.
+
+# 10. Product cards
+
+Follow the product-card system in `DESIGN.md`.
+
+Requirements:
+
+- Square image area
+- Ivory or stone image background
+- Product details below the image
+- No heavy outer border
+- No strong shadow
+- Minimal radius
+- Left-aligned text
+- Product image is visually dominant
+- Secondary image on hover
+- Gentle image zoom
+- Wishlist action
+- New, Sale, Bestseller and Sold Out badges
+- Add to Bag visible on touch devices
+
+Desktop grid:
+
+- Four columns on large screens
+- Three columns on smaller desktop
+
+Tablet:
+
+- Two or three columns
+
+Mobile:
+
+- Two columns
+- One column only on extremely narrow screens
+
+Do not rely entirely on hover for important actions.
+
+Add to Bag should update frontend cart state and show a visual confirmation.
+
+Wishlist should update frontend wishlist state and optionally persist in local storage.
+
+# 11. Collection pages
+
+Create collection routes such as:
+
+```text
+/shop
+/new-arrivals
+/women
+/men
+/collections/:slug
+/category/:slug
+/sale
+```
+
+Collection page must include:
+
+- Breadcrumbs
+- Page heading
+- Description
+- Product count
+- Category links
+- Filter controls
+- Sort menu
+- Selected-filter chips
+- Product grid
+- Pagination or Load More
+- Loading skeletons
+- Empty result state
+
+Filters:
+
+- Gender
+- Category
+- Size
+- Colour
+- Price
+- Fit
+- Fabric
+- Availability
+- Collection
+
+Sort options:
+
+- Featured
+- Newest
+- Best Selling
+- Price: Low to High
+- Price: High to Low
+- Name: A to Z
+- Name: Z to A
+
+Desktop:
+
+- Filter sidebar approximately 250–280px
+- Product grid beside it
+
+Mobile:
+
+- Filter drawer
+- Sort bottom sheet or modal
+- Sticky filter/sort utility row where appropriate
+- Clear All and Apply buttons
+
+Preserve filters and sorting in URL query parameters.
+
+Filtering, sorting and pagination must run entirely in the browser using mock product data.
+
+# 12. Product details page
+
+Create route:
+
+```text
+/product/:slug
+```
+
+Desktop layout:
+
+- Product media receives approximately 60% width
+- Product information receives approximately 40% width
+- Product information may be sticky
+
+Product gallery:
+
+- Five images
+- Large main media
+- Supporting thumbnails or two-column image grid
+- Zoom
+- Keyboard controls
+- Mobile swipe carousel
+- Image counter
+
+Product information:
+
+- Breadcrumbs
+- Product badge
+- Category
+- Product name
+- Short description
+- Regular/sale price
+- Inclusive-tax text
+- Colour selector
+- Selected colour name
+- Size selector
+- Size guide
+- Stock state
+- Quantity selector
+- Add to Bag
+- Buy Now
+- Wishlist
+- Delivery estimate
+- Payment information
+- Product details accordions
+
+Accordions:
+
+- Description
+- Fabric & Fit
+- Product Details
+- Care Instructions
+- Delivery and Returns
+
+Additional sections:
+
+- Complete the Look
+- You May Also Like
+- Recently Viewed
+
+Validation:
+
+- Require size before adding to bag
+- Show inline error
+- Disable unavailable sizes
+- Prevent duplicate clicks while a mock action is processing
+- Update cart count immediately after success
+
+Buy Now should add the selected item to frontend cart state and navigate to the checkout UI. It must not process a real order or payment.
+
+Mobile:
+
+- Swipeable image carousel
+- Sticky bottom Add to Bag area
+- Full-width buttons
+- No horizontal page overflow
+
+# 13. Size guide
+
+Create separate size guides for:
+
+- Men’s tops
+- Men’s bottoms
+- Women’s tops
+- Women’s bottoms
+- Dresses
+
+Display in an accessible modal or drawer.
+
+Use semantic tables containing:
+
+- Size
+- Chest/Bust
+- Waist
+- Hip
+- Length where relevant
+- Inches and centimetres
+
+On mobile, allow the table itself to scroll horizontally without causing the entire page to overflow.
+
+# 14. Search experience
+
+Create a responsive search overlay.
+
+Initial state:
+
+- Large search field
+- Trending searches
+- Popular categories
+- Recently viewed products
+
+Search results:
+
+- Matching products
+- Category suggestions
+- Search term highlighting
+- Product image, name and price
+- View All Results action
+
+No-result state:
+
+- Display the submitted query
+- Suggest alternative search terms
+- Show popular categories
+- Show featured products
+
+Requirements:
+
+- Autofocus input
+- Clear button
+- Escape closes on desktop
+- Keyboard navigation
+- Focus trap
+- Body scroll lock
+- Screen-reader labels
+- Debounced frontend search
+
+Search must run locally against static product and category data.
+
+# 15. Wishlist
+
+Create a working frontend wishlist UI.
+
+Requirements:
+
+- Wishlist icon on product cards and product details
+- Persist the guest wishlist in local storage
+- Wishlist page with product grid
+- Empty wishlist state
+- Move to Bag action
+- Remove item action
+- Wishlist count in header
+- Toast or live-region confirmation when an item is added or removed
+
+Do not connect wishlist data to user accounts or a database.
+
+# 16. Cart drawer
+
+Create a working right-side cart drawer using frontend state.
+
+Desktop width:
+
+420–520px
+
+Mobile:
+
+Full screen
+
+Cart drawer includes:
+
+- Header with item count
+- Close button
+- Product thumbnail
+- Product name
+- Colour
+- Size
+- Quantity selector
+- Remove action
+- Line total
+- Subtotal
+- Shipping message
+- View Bag
+- Checkout
+
+Use a sticky footer for subtotal and checkout actions.
+
+Empty state:
+
+- “Your bag is empty.”
+- Continue Shopping button
+- Suggested products
+
+Requirements:
+
+- Lock body scroll
+- Trap focus
+- Return focus after closing
+- Prevent invalid quantity
+- Update totals immediately
+- Provide mock loading and error states
+- Persist cart in local storage where useful
+
+Do not send cart data to any server.
+
+# 17. Cart page
+
+Create route:
+
+```text
+/cart
+```
+
+Include:
+
+- Cart item list
+- Product image and details
+- Variant information
+- Quantity controls
+- Remove action
+- Save to Wishlist
+- Coupon input
+- Delivery estimate
+- Subtotal
+- Discount
+- Shipping
+- Tax where relevant
+- Final total
+- Checkout button
+- Continue shopping
+
+Desktop:
+
+- Cart items on left
+- Sticky order summary on right
+
+Mobile:
+
+- Stacked items
+- Order summary below products
+- Large checkout button
+
+Use frontend calculations based on cart state.
+
+Create demo coupon codes such as:
+
+- VIMUHET10
+- WELCOME15
+- FREESHIP
+
+Coupon validation and discounts should run entirely in the browser.
+
+# 18. Authentication UI
+
+Create frontend-only authentication pages:
+
+```text
+/login
+/signup
+/forgot-password
+/reset-password
+```
+
+Do not use Supabase authentication or any authentication backend.
+
+The pages should include realistic UI states for:
+
+- Email/password signup
+- Email/password login
+- Forgot password
+- Reset password
+- Remember me
+- Password visibility toggle
+- Client-side validation
+- Loading state
+- Success state
+- Friendly error state
+
+Form design:
+
+- Centred narrow layout
+- Minimal Vimuhet branding
+- 52–56px form fields
+- Black primary action
+- Visible labels
+- Inline validation
+- Loading states
+- Friendly error messages
+
+For the demo:
+
+- Submitting login may set a mock signed-in flag in local storage and navigate to `/account`.
+- Submitting signup may show a mock success message and navigate to `/account`.
+- Forgot-password may show a simulated “reset link sent” confirmation.
+- Reset-password may show a simulated success state.
+- Logout may clear the mock signed-in flag.
+
+Do not call any API or claim that a real account was created.
+
+# 19. Customer account UI
+
+Create route:
+
+```text
+/account
+```
+
+This is a frontend demonstration route using mock customer data.
+
+Desktop:
+
+- Left navigation
+- Right content area
+
+Navigation:
+
+- Overview
+- My Orders
+- Addresses
+- Profile Details
+- Wishlist
+- Logout
+
+Account overview:
+
+- Customer name
+- Email
+- Recent order
+- Saved address
+- Wishlist count
+- Quick links
+
+Mobile:
+
+- Replace sidebar with stacked navigation or an accessible dropdown
+- Keep cards full width
+
+Use a realistic mock customer such as:
+
+- Name: Aanya Mehta
+- Email: aanya@example.com
+- Phone: +91 98765 43210
+
+Do not connect this page to a real account system.
+
+# 20. My Orders UI
+
+Create route:
+
+```text
+/account/orders
+```
+
+Use static mock order data.
+
+Each order card must include:
+
+- Order number
+- Date
+- Status
+- Payment status
+- Product thumbnail previews
+- Item count
+- Total
+- View Order
+- Download Invoice where available
+
+Order statuses:
+
+- Order Placed
+- Confirmed
+- Processing
+- Shipped
+- Out for Delivery
+- Delivered
+- Cancelled
+- Refunded
+
+Use restrained semantic status badges.
+
+Empty state:
+
+- “You haven’t placed an order yet.”
+- Shop New Arrivals button
+
+Include at least four mock orders showing different statuses.
+
+The Download Invoice action should open a styled mock invoice preview or browser print view. Do not generate or retrieve invoices from a server.
+
+# 21. Order details UI
+
+Create route:
+
+```text
+/account/orders/:orderId
+```
+
+Use mock order data.
+
+Include:
+
+- Back to orders
+- Order number
+- Order date
+- Status progress tracker
+- Payment status
+- Delivery estimate
+- Tracking details
+- Ordered products
+- Product image
+- Product name
+- Colour
+- Size
+- Quantity
+- Unit price
+- Line total
+- Shipping address
+- Billing address
+- Payment summary
+- Subtotal
+- Discount
+- Shipping
+- Tax
+- Final total
+- Invoice action
+- Contact Support action
+
+Product image and name should link to the product page when the product exists in mock data.
+
+Keep each mock order’s historical product name, image, price, colour and size inside the mock order record instead of deriving all values from current product data.
+
+Invoice action:
+
+- Open a mock invoice preview modal or dedicated printable frontend view
+- Include Vimuhet branding
+- Include mock order items and totals
+- Support browser print
+- Do not contact a server
+
+Contact Support action:
+
+- Navigate to the contact page with the mock order number prefilled in frontend state or URL query parameters
+
+# 22. Addresses and profile UI
+
+Create:
+
+```text
+/account/addresses
+/account/profile
+```
+
+Use mock customer and address data.
+
+Address UI features:
+
+- Add address
+- Edit address
+- Delete address
+- Set as default
+- Client-side validation
+- Confirmation before deletion
+- Success/error toasts
+- Local state or local-storage persistence for the demo
+
+Profile fields:
+
+- First name
+- Last name
+- Email
+- Phone
+- Date of birth optional
+- Gender optional
+
+Use thin bordered cards with minimal styling.
+
+Save actions should update local frontend state only.
+
+Do not claim the information was saved to a real account.
+
+# 23. Checkout UI
+
+Create route:
+
+```text
+/checkout
+```
+
+Build a polished frontend-only multi-step checkout:
+
+1. Contact information
+2. Delivery address
+3. Delivery method
+4. Payment method
+5. Review order
+6. Confirmation
+
+Display UI options for:
+
+- Guest checkout
+- Mock logged-in checkout
+- Mock saved addresses
+- Coupon code
+- Cash on Delivery
+- Credit or debit card
+- UPI
+- Net banking
+- Wallets
+
+Important:
+
+- These payment options are visual demonstrations only.
+- Do not integrate Stripe, Razorpay or any other payment service.
+- Do not collect or store real card data.
+- Do not request real UPI credentials.
+- Do not process money.
+- Do not create a server-side order.
+- Clearly label the checkout as demo mode where appropriate.
+
+For card UI:
+
+- Show cardholder name
+- Card number placeholder
+- Expiry
+- CVV
+- Use client-side formatting only
+- Never persist values
+- Use a notice such as “Demo checkout — no payment will be processed”
+
+Checkout behaviour:
+
+- Validate required fields in the browser
+- Calculate totals from frontend cart state
+- Allow moving between steps
+- Preserve values while navigating between steps
+- On final confirmation, create a mock order object in frontend state or local storage
+- Clear the demo cart
+- Navigate to `/order-confirmation/:orderId`
+
+# 24. Order confirmation UI
+
+Create route:
+
+```text
+/order-confirmation/:orderId
+```
+
+Include:
+
+- Confirmation message
+- Mock order number
+- Product summary
+- Delivery address
+- Estimated delivery
+- Total
+- View Order button
+- Continue Shopping button
+
+Clearly indicate that this is a demo order when the checkout is in demo mode.
+
+The View Order button should open the matching frontend order-details route.
+
+# 25. About page
+
+Create route:
+
+```text
+/about
+```
+
+Use an editorial layout.
+
+Suggested sections:
+
+- Vimuhet brand introduction
+- “Made for Every Version of You”
+- Design philosophy
+- Fabric and quality commitment
+- Responsible production statement
+- Large image/text chapters
+- Shop collection call to action
+
+Do not make unsupported sustainability claims.
+
+# 26. Contact page
+
+Create route:
+
+```text
+/contact
+```
+
+Include:
+
+- Breadcrumbs
+- Contact heading
+- Short support text
+- Contact form
+- Support information
+- FAQ link
+
+Form fields:
+
+- Reason
+- Order number optional
+- First name
+- Last name
+- Email
+- Phone
+- Message
+- Privacy consent
+- Submit
+
+Add:
+
+- Client-side validation
+- Loading state
+- Success state
+- Error state
+
+Submitting the form should simulate success in the frontend only.
+
+Do not send, store or email the form data.
+
+# 27. FAQ and policy pages
+
+Create:
+
+```text
+/faq
+/shipping
+/returns
+/privacy
+/terms
+```
+
+FAQ categories:
+
+- Ordering
+- Payments
+- Shipping
+- Returns and Exchanges
+- Products and Sizing
+- Account
+- Care Instructions
+
+Use accessible accordions.
+
+Policy pages should use a narrow readable content container.
+
+The content may be realistic demo copy but must be clearly editable and should not make legally binding claims unless reviewed later.
+
+# 28. Footer
+
+Create a dark premium footer.
+
+Footer groups:
+
+Shop:
+
+- New Arrivals
+- Women
+- Men
+- Collections
+- Essentials
+- Sale
+
+Vimuhet:
+
+- About Us
+- Our Story
+- Contact
+- Careers
+
+Customer Care:
+
+- FAQs
+- Shipping
+- Returns and Exchanges
+- Size Guide
+- Track Order
+
+Account:
+
+- Login
+- My Account
+- My Orders
+- Wishlist
+
+Legal:
+
+- Privacy Policy
+- Terms and Conditions
+- Refund Policy
+
+Include:
+
+- Instagram
+- Pinterest
+- Facebook
+- YouTube
+- Payment method icons
+- Copyright
+- Country/currency selector if useful
+
+Desktop:
+
+- Multi-column layout
+
+Mobile:
+
+- Accordion groups
+- Minimum 48px accordion controls
+
+Social links may use placeholder destinations such as `#` only if they clearly show a non-blocking “Link coming soon” message. Prefer internal demo pages where possible.
+
+# 29. Frontend data architecture
+
+Do not create a database schema.
+
+Instead, create typed static frontend data structures for:
+
+```text
+products
+productImages
+productVariants
+categories
+collections
+collectionProducts
+cartItems
+wishlistItems
+addresses
+orders
+orderItems
+orderStatusHistory
+coupons
+reviews
+customerProfile
+newsletterFormState
+contactFormState
+```
+
+Create TypeScript interfaces such as:
+
+```ts
+Product
+ProductImage
+ProductVariant
+Category
+Collection
+CartItem
+WishlistItem
+Address
+Order
+OrderItem
+OrderStatus
+Coupon
+Review
+CustomerProfile
+```
+
+Requirements:
+
+- Keep mock data in dedicated `src/data` files
+- Keep types in `src/types`
+- Do not mix large data arrays inside page components
+- Create reusable selectors and utility functions
+- Calculate cart and order totals from item values
+- Keep historical order snapshots inside mock order items
+- Use stable IDs and slugs
+- Make the data shape easy to replace with an API later
+- Do not create database clients or migration files
+
+# 30. Demo content
+
+Seed the frontend with:
+
+- At least 24 products
+- At least six categories
+- Men and women collections
+- New arrival products
+- Sale products
+- Bestseller products
+- Realistic colour and size variants
+- Stock levels
+- Related products
+- Homepage featured collections
+- At least four mock orders
+- At least two mock addresses
+- A mock customer profile
+- Several mock reviews
+
+Use original Vimuhet names such as:
+
+- The Arin Relaxed Shirt
+- Mira Linen Dress
+- Veyra Tailored Trousers
+- Nilo Essential Tee
+- Aven Overshirt
+- Sora Co-ord Set
+- Elian Straight Jeans
+- Rhea Ribbed Top
+- Orin Textured Polo
+- Naira Wrap Dress
+- Kavi Utility Jacket
+- Taren Wide-Leg Trousers
+
+Do not use real competitor product names.
+
+Use high-quality fashion placeholder images or royalty-free image URLs.
+
+Keep all image data easy to replace later.
+
+# 31. Loading, empty and error states
+
+Implement matching frontend states for:
+
+- Page loading
+- Product-card skeleton
+- Empty cart
+- Empty wishlist
+- Empty orders
+- No search results
+- No filtered products
+- Missing product image
+- Product unavailable
+- Mock data loading failure
+- Failed form validation
+- Simulated form submission error
+- Signed-out account prompt
+- Invalid mock order
+- Unknown product slug
+- 404 page
+
+Provide a simple development-friendly way to preview these states, such as:
+
+- Query parameters
+- Demo controls
+- Separate mock-state constants
+- A small development-only state selector
+
+Do not leave blank screens or infinite loading states.
+
+# 32. Accessibility
+
+Follow WCAG-friendly practices.
+
+Requirements:
+
+- Semantic HTML
+- Logical heading hierarchy
+- Visible focus states
+- Keyboard-operable menus
+- Focus traps in modals and drawers
+- Screen-reader labels
+- Meaningful alt text
+- Colour contrast
+- Minimum 44×44px interactive targets
+- Form labels
+- Accessible validation
+- Reduced-motion support
+- Live regions for cart, wishlist and filter updates
+- Do not rely on colour alone
+- Hide inactive drawers from assistive technology
+- Return focus to the trigger after closing a modal or drawer
+- Ensure mock form success and error messages are announced
+
+# 33. Responsive requirements
+
+Test at:
+
+- 320px
+- 375px
+- 480px
+- 768px
+- 1024px
+- 1280px
+- 1440px
+- 1920px
+
+Ensure:
+
+- No horizontal page overflow
+- Mobile navigation works
+- Product grid changes correctly
+- Filters become a drawer
+- Product details stack correctly
+- Cart drawer becomes full screen
+- Footer becomes accordions
+- Buttons remain easy to tap
+- Long product names wrap correctly
+- Tables only scroll inside their own containers
+- Images do not become distorted
+- Checkout steps remain usable on mobile
+- Account navigation works on small screens
+- Order cards remain readable
+- Sticky actions do not cover content
+
+# 34. Performance
+
+Implement:
+
+- Lazy-loaded below-the-fold images
+- Responsive image sizing
+- Image aspect ratios to prevent layout shift
+- Route-level code splitting where appropriate
+- Skeleton loading
+- Debounced local search
+- Efficient client-side filtering and sorting
+- Memoized derived cart totals where useful
+- Limited homepage initial rendering
+- Pagination or Load More
+- No unnecessary re-renders
+- No oversized animation libraries
+- No backend SDKs
+- No database libraries
+
+# 35. SEO
+
+Add frontend SEO support:
+
+- Unique page titles
+- Meta descriptions
+- Open Graph metadata
+- Product structured data based on mock product data
+- Breadcrumb structured data
+- Organisation schema
+- Canonical URL placeholders
+- Product alt text
+- Semantic page headings
+- Clean route slugs
+- Sitemap-ready route structure
+
+Do not claim unavailable real-world business details.
+
+Keep domain-specific values easy to replace later.
+
+# 36. Implementation rules
+
+- Read the attached `DESIGN.md` before coding.
+- Treat its layout and component rules as the design foundation.
+- Adapt the design to Vimuhet’s clothing identity.
+- Do not copy one8 assets or content.
+- Build frontend UI only.
+- Do not connect Supabase.
+- Do not create a database.
+- Do not create server APIs.
+- Do not add real authentication.
+- Do not add real payment processing.
+- Do not add cloud storage.
+- Do not add environment secrets.
+- Use reusable React components.
+- Use TypeScript types.
+- Avoid inline styling.
+- Use Tailwind theme variables or CSS variables.
+- Do not put all application logic in page components.
+- Separate components, UI state, mock data and utility logic.
+- Calculate cart and order totals from frontend item values.
+- Do not use arbitrary hardcoded final totals.
+- Do not use placeholder buttons that do nothing.
+- All visible navigation and primary actions must work within the frontend demo.
+- Use realistic mock data.
+- Clearly label demo checkout and payment behaviour.
+- Keep the website visually consistent on every route.
+- Do not make account pages look like a separate admin dashboard.
+- Preserve a monochrome, editorial, premium design language.
+- Structure the code so a real backend can replace mock data later without redesigning the interface.
+
+# 37. Final deliverables
+
+After building the website, provide:
+
+1. Summary of the implemented frontend
+2. Complete route list
+3. Reusable component list
+4. Frontend state-management summary
+5. Static data-file list
+6. Product, cart and wishlist behaviour
+7. Mock authentication UI flow
+8. Mock account and order UI behaviour
+9. Demo checkout flow
+10. Seeded mock data summary
+11. Testing instructions
+12. Mobile responsiveness summary
+13. Accessibility summary
+14. List of places where a backend would be connected later
+15. Confirmation that no database, Supabase or real payment service was added
+
+Do not provide database tables, migrations, API endpoints or backend credentials.
+
+# 38. Acceptance criteria
+
+The frontend UI is complete only when:
+
+- Vimuhet has a unique identity.
+- The uploaded `DESIGN.md` is visibly reflected in the design.
+- The website is not a direct copy of one8.
+- Homepage sections are polished and responsive.
+- Product listings support frontend filtering and sorting.
+- Product pages support size, colour and quantity selection.
+- Add to Bag updates frontend cart state.
+- Cart totals update correctly.
+- Wishlist works in frontend state.
+- Wishlist may persist through local storage.
+- Login, signup and password pages provide complete mock UI flows.
+- Account pages display realistic mock customer data.
+- Orders and order details display realistic mock data.
+- Checkout completes a clearly labelled demo flow.
+- Demo checkout creates a mock frontend order.
+- No real payment is processed.
+- Empty, loading and error states exist.
+- Mobile layouts have no horizontal overflow.
+- Header, navigation, search and cart drawers are accessible.
+- Footer and newsletter are complete.
+- Buttons and links are functional within the frontend prototype.
+- The UI remains consistent across all pages.
+- No Supabase integration exists.
+- No database exists.
+- No backend API exists.
+- No live secrets or payment credentials are used.
+- The project is organised so backend integration can happen later.
+
+Start by creating:
+
+1. Global design tokens
+2. Shared layout
+3. Announcement bar
+4. Header
+5. Desktop and mobile navigation
+6. Search overlay
+7. Product card
+8. Homepage
+
+Then implement:
+
+1. Collections
+2. Product details
+3. Size guide
+4. Wishlist
+5. Cart drawer
+6. Cart page
+7. Authentication UI
+8. Account UI
+9. Orders UI
+10. Checkout UI
+11. Content pages
+12. Empty, loading and error states
