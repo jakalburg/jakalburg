@@ -1,0 +1,19 @@
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  role          String    @default("user") // "user" | "admin"
+  password      String? // bcrypt hash; null for OAuth-only accounts
+  providers     String[]  @default([]) // e.g. ["email", "google"]
+  disabled      Boolean   @default(false) // blocks login when true
+  tokenVersion  Int       @default(0) // bump to invalidate all issued JWTs
+
+  accounts Account[]
+  profiles Profile[]
+  cart     Cart?
+  orders   Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

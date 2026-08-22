@@ -1,0 +1,8 @@
+# graphify scope: keep the knowledge graph to the actual product
+# (admin/ + client/ + server/ + project docs). See CLAUDE.md.
+
+# Reference-only clone of the old app — a duplicate codebase, pure noise in the graph.
+reference/
+
+# graphify's own skill machinery (tooling docs, not Jakalburg knowledge).
+.claude/skills/

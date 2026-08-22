@@ -1,0 +1,27 @@
+// One persistent cart per user. Line items store only identity + quantity;
+// title/image/price/slug are joined live from Product at read time so pricing
+// stays authoritative (never a stale snapshot).
+model Cart {
+  id        String     @id @default(cuid())
+  userId    String     @unique
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  size      String
+  color     String
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Matches the client's composite key `productId::size::color`.
+  @@unique([cartId, productId, size, color])
+  @@index([cartId])
+}

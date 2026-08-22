@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+.webpack/
+
+# env / secrets
+.env
+.env.*.local
+
+# logs
+*.log
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+
+# Prisma generated schema (built from prisma/models/*.prisma)
+prisma/schema.prisma
+/generated/prisma

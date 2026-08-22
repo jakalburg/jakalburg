@@ -1,47 +1,54 @@
+# ── Root .gitignore for the Jakalburg monorepo (client / admin / server) ──
+# Per-app rules live in client/.gitignore, admin/.gitignore, server/.gitignore.
+# This file covers repo-root cruft and things that must never be pushed.
+
+# Dependencies (any level)
+node_modules/
+.pnp
+.pnp.*
+
+# Env / secrets — never commit
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Build output / generated (any level)
+.next/
+out/
+dist/
+dist-ssr/
+build/
+.output/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-.output
-.vinxi
-.tanstack/**
-.nitro
-*.local
+# Local reference project (kept locally, not pushed)
+reference/
 
-# Next.js build output & generated files
-/.next/
-/out/
-/build
-*.tsbuildinfo
-next-env.d.ts
+# Scratch images / screenshots
+image/
 
-# Wrangler / Cloudflare
-.wrangler/
-.dev.vars
+# Knowledge graph output (regenerate with `graphify update .`)
+graphify-out/
 
-# Env files (contain secrets — never commit)
-.env
-.env.*
-!.env.example
+# Claude Code local overrides (keep .claude/ and CLAUDE.md tracked)
+.claude/settings.local.json
 
-# Reference project (kept locally, not pushed)
-kaybykhushie/
-
-# Editor directories and files
+# OS / editor
+.DS_Store
+*.pem
+.idea/
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
 *.suo
-*.ntvs*
-*.njsproj
-*.sln
 *.sw?
