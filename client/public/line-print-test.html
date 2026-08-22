@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Line print test</title>
+    <style>
+      body {
+        font-family: Arial, Helvetica, sans-serif;
+        color: #111;
+        max-width: 760px;
+        margin: 24px auto;
+        padding: 0 16px;
+        font-size: 14px;
+      }
+      h1 { font-size: 18px; }
+      .row {
+        padding: 14px 0;
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .label { color: #555; font-size: 12px; }
+      .swatch { flex: 1; }
+
+      /* Each technique renders a horizontal line a different way. */
+      .b-hex-300 { border-bottom: 1px solid #d1d5db; }
+      .b-hex-400 { border-bottom: 1px solid #9ca3af; }
+      .b-hex-500 { border-bottom: 1px solid #6b7280; }
+      .b-black-1 { border-bottom: 1px solid #000; }
+      .b-black-2 { border-bottom: 2px solid #000; }
+      .b-oklch-light { border-bottom: 1px solid oklch(0.86 0.01 85); }
+      .b-oklch-mid { border-bottom: 1px solid oklch(0.7 0 0); }
+      .bg-line { height: 2px; background: #6b7280; }        /* needs "Background graphics" ON */
+      .shadow-line { box-shadow: 0 1px 0 0 #6b7280; height: 1px; }
+
+      table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+      td, th { border: 1px solid #9ca3af; padding: 6px 10px; text-align: left; }
+
+      @page { margin: 14mm; }
+      @media print {
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .no-print { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Line print test</h1>
+    <p class="no-print">
+      Open <code>http://localhost:3000/line-print-test.html</code>, then
+      <strong>Ctrl/Cmd&nbsp;+&nbsp;P → Save as PDF</strong>. Note which numbered
+      lines appear in the exported PDF and tell me the list — that isolates the cause.
+    </p>
+
+    <div class="row"><span class="label">1. border 1px hex #d1d5db (gray-300)</span><span class="swatch b-hex-300"></span></div>
+    <div class="row"><span class="label">2. border 1px hex #9ca3af (gray-400)</span><span class="swatch b-hex-400"></span></div>
+    <div class="row"><span class="label">3. border 1px hex #6b7280 (gray-500)</span><span class="swatch b-hex-500"></span></div>
+    <div class="row"><span class="label">4. border 1px solid #000</span><span class="swatch b-black-1"></span></div>
+    <div class="row"><span class="label">5. border 2px solid #000</span><span class="swatch b-black-2"></span></div>
+    <div class="row"><span class="label">6. border 1px oklch(0.86 …) — theme hairline</span><span class="swatch b-oklch-light"></span></div>
+    <div class="row"><span class="label">7. border 1px oklch(0.7 …)</span><span class="swatch b-oklch-mid"></span></div>
+    <div class="row"><span class="label">8. &lt;hr&gt; element</span><span class="swatch"><hr /></span></div>
+    <div class="row"><span class="label">9. background line (needs "Background graphics" ON)</span><span class="swatch bg-line"></span></div>
+    <div class="row"><span class="label">10. box-shadow line</span><span class="swatch shadow-line"></span></div>
+
+    <p class="label" style="margin-top:20px">11. table borders (border-collapse, #9ca3af):</p>
+    <table>
+      <thead><tr><th>Item</th><th>Qty</th><th>Amount</th></tr></thead>
+      <tbody>
+        <tr><td>Washed Cotton Shorts</td><td>1</td><td>&#8377;2,290</td></tr>
+        <tr><td>Total</td><td>1</td><td>&#8377;2,290</td></tr>
+      </tbody>
+    </table>
+  </body>
+</html>

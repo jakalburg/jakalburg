@@ -1,0 +1,19 @@
+model Profile {
+  id               String   @id @default(cuid())
+  firstName        String?
+  lastName         String?
+  addressLine1     String?
+  addressLine2     String?
+  city             String?
+  country          String?
+  zipCode          String?
+  contactNo        String?
+  addresses        Json?
+  defaultAddressId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}

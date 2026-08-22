@@ -1,0 +1,13 @@
+// A curated fabric the admin can reuse across products. Products still store
+// their fabric as a free-text string (Product.fabric) — this table is the
+// managed list the admin picks from (or adds to) in the product form.
+model Fabric {
+  id          String   @id @default(cuid())
+  name        String   @unique // display value, e.g. "Mercerised cotton piqué"
+  slug        String   @unique // slugified name, for stable identity
+  description String? // optional note shown in the admin fabrics list
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([name])
+}

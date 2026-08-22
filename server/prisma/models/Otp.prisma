@@ -1,0 +1,20 @@
+enum OtpPurpose {
+  SIGNUP_VERIFICATION
+  PASSWORD_RESET
+}
+
+model Otp {
+  id          String     @id @default(cuid())
+  email       String
+  purpose     OtpPurpose
+  codeHash    String // bcrypt hash of the 6-digit code — raw code is never stored
+  expiresAt   DateTime
+  attempts    Int        @default(0)
+  maxAttempts Int        @default(5)
+  consumedAt  DateTime? // set once verified (single-use)
+  lastSentAt  DateTime   @default(now()) // drives resend cooldown
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([email, purpose])
+}

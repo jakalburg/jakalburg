@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1d0441" />
+    <title>Jakalburg Admin Offline</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        font-family: Arial, Helvetica, sans-serif;
+        color: #1d0441;
+        background: #ffffff;
+      }
+
+      main {
+        width: min(440px, 100%);
+        text-align: center;
+      }
+
+      img {
+        display: block;
+        width: 88px;
+        height: 88px;
+        margin: 0 auto 24px;
+        border-radius: 22px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: clamp(26px, 8vw, 34px);
+        line-height: 1.1;
+      }
+
+      p {
+        margin: 0 auto 24px;
+        color: #61576b;
+        font-size: 16px;
+        line-height: 1.55;
+      }
+
+      button {
+        min-height: 44px;
+        border: 0;
+        border-radius: 8px;
+        padding: 0 22px;
+        font: inherit;
+        font-weight: 700;
+        color: #ffffff;
+        background: #1d0441;
+        cursor: pointer;
+      }
+
+      button:focus-visible {
+        outline: 3px solid #b69ad8;
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/pwa-icon-192.png" alt="Jakalburg" />
+      <h1>You&rsquo;re offline</h1>
+      <p>
+        Jakalburg Admin requires an internet connection to load the latest orders and
+        administrative data.
+      </p>
+      <p>Check your connection and try again.</p>
+      <button type="button" onclick="window.location.reload()">Retry</button>
+    </main>
+  </body>
+</html>

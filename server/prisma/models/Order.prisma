@@ -1,0 +1,44 @@
+// Order history, tied to a user account. Each line item fully snapshots the
+// product it was for, so history stays stable even if the product is later
+// edited or deleted. Monetary fields are whole rupees (INR), like Product.price.
+enum OrderStatus {
+  processing
+  shipped
+  delivered
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique // public id shown to the customer, e.g. "JB-284917"
+  userId          String
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items           OrderItem[]
+  subtotal        Int
+  shipping        Int         @default(0)
+  discount        Int         @default(0)
+  total           Int
+  status          OrderStatus @default(processing)
+  shippingAddress Json // frozen snapshot of the shipping Address at checkout
+  email           String
+  paymentLabel    String // masked display string only (e.g. "Card ending •••• 4242"); no payment data stored
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([userId])
+}
+
+model OrderItem {
+  id        String @id @default(cuid())
+  orderId   String
+  order     Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  slug      String
+  title     String
+  image     String
+  price     Int
+  size      String
+  color     String
+  quantity  Int
+
+  @@index([orderId])
+}

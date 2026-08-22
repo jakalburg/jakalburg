@@ -1,0 +1,50 @@
+enum Gender {
+  women
+  men
+  unisex
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  title          String
+  gender         Gender
+  category       String
+  price          Int // whole rupees (INR); the UI formats with Intl en-IN
+  compareAtPrice Int? // original/strike-through price when on sale
+  images         String[] // ordered image URLs; images[0] is the primary
+  sizes          String[]
+  soldOutSizes   String[] @default([])
+  tags           String[] @default([])
+  isNew          Boolean  @default(false)
+  onSale         Boolean  @default(false)
+  collection     String? // free-text collection slug (e.g. "summer-essentials")
+  essential      Boolean  @default(false) // "featured"/essentials flag used on home + collections
+  description    String
+  fabric         String
+  care           String
+  stock          Int      @default(0) // simple inventory count for stock-state testing
+  isActive       Boolean  @default(true) // storefront visibility gate; admin can hide a product without deleting it
+
+  colors ProductColor[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([gender])
+  @@index([category])
+  @@index([collection])
+  @@index([isActive])
+}
+
+// Colour options for a product (the storefront's only real variant axis).
+model ProductColor {
+  id        String  @id @default(cuid())
+  productId String
+  name      String // e.g. "Ivory"
+  hex       String // e.g. "#f4efe6"
+  position  Int     @default(0) // display order
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
