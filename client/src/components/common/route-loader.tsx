@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { Loader } from "@/components/ui/loader";
+import { FullScreenLoader } from "@/components/ui/loader";
 
 // One-shot flag: when a navigation is triggered by an action that already shows
 // its own loading widget (e.g. a button with `loading`), we don't want to *also*
@@ -70,16 +70,5 @@ export function RouteLoader() {
 
   if (!active) return null;
 
-  return (
-    <div
-      role="status"
-      aria-label="Loading"
-      aria-live="polite"
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-foreground/40 backdrop-blur-[1px]"
-    >
-      <div className="rounded-md border bg-card px-10 py-8 shadow-sm">
-        <Loader size={44} />
-      </div>
-    </div>
-  );
+  return <FullScreenLoader />;
 }

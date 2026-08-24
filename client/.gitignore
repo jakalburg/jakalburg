@@ -45,3 +45,5 @@ kaybykhushie/
 *.njsproj
 *.sln
 *.sw?
+.vercel
+.env*

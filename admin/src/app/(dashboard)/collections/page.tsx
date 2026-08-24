@@ -63,33 +63,38 @@ export default function CollectionsPage() {
       className: "w-[80px]",
       cell: (collection: any) => (
         <ImageShimmer
-          src={collection.image}
-          alt={collection.name}
+          src={collection.image || undefined}
+          alt={collection.title}
           wrapperClassName="w-12 h-12 rounded-md border border-input"
         />
       ),
     },
     {
-      header: "Name",
+      header: "Title",
       cell: (collection: any) => (
-        <div className="font-medium">{collection.name}</div>
+        <div>
+          <div className="font-medium">{collection.title}</div>
+          {collection.subtitle ? (
+            <div className="text-sm text-muted-foreground">
+              {collection.subtitle}
+            </div>
+          ) : null}
+        </div>
       ),
     },
     {
       header: "Products",
       cell: (collection: any) => (
         <span className="text-sm text-muted-foreground">
-          {collection._count?.products ?? 0}
+          {collection.productCount ?? 0}
         </span>
       ),
     },
     {
       header: "Status",
       cell: (collection: any) => (
-        <Badge
-          variant={collection.status === "active" ? "default" : "secondary"}
-        >
-          {collection.status || "active"}
+        <Badge variant={collection.enabled ? "default" : "secondary"}>
+          {collection.enabled ? "active" : "hidden"}
         </Badge>
       ),
     },
@@ -121,7 +126,7 @@ export default function CollectionsPage() {
                 <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                 <AlertDialogDescription>
                   This action cannot be undone. This will permanently delete
-                  the collection &quot;{collection.name}&quot; and remove it
+                  the collection &quot;{collection.title}&quot; and remove it
                   from associated products.
                 </AlertDialogDescription>
               </AlertDialogHeader>

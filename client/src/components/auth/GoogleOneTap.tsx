@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { toast } from "sonner";
 import { useGoogleLogin } from "@/hooks/useAuth";
+import { FullScreenLoader } from "@/components/ui/loader";
 
 declare global {
   interface Window {
@@ -33,6 +34,12 @@ export default function GoogleOneTap({
   const buttonRef = useRef<HTMLDivElement>(null);
   const googleLogin = useGoogleLogin();
 
+  // Covers the gap between "credential received" and the redirect landing: the
+  // token-verify round-trip plus the navigation. Set on credential, held true
+  // through onSuccess (the component unmounts on redirect), cleared on error so
+  // the user can retry.
+  const [submitting, setSubmitting] = useState(false);
+
   // Keep the latest mutation/redirect in refs so the GIS callback (registered
   // once) always calls the current versions without re-initializing GIS.
   const loginRef = useRef(googleLogin);
@@ -54,12 +61,14 @@ export default function GoogleOneTap({
 
     const handleCredential = (response: { credential?: string }) => {
       if (!response?.credential) return;
+      setSubmitting(true);
       loginRef.current.mutate(response.credential, {
         onSuccess: () => {
           toast.success("Signed in with Google");
           void router.push(redirectRef.current);
         },
         onError: (err: unknown) => {
+          setSubmitting(false);
           const message =
             err instanceof Error
               ? err.message
@@ -123,5 +132,10 @@ export default function GoogleOneTap({
 
   if (!CLIENT_ID) return null;
 
-  return <div ref={buttonRef} className="flex min-h-[44px] justify-center" />;
+  return (
+    <>
+      <div ref={buttonRef} className="flex min-h-[44px] justify-center" />
+      {submitting && <FullScreenLoader label="Signing you in" />}
+    </>
+  );
 }

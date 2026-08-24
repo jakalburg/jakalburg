@@ -4,13 +4,15 @@
 @custom-variant dark (&:is(.dark *));
 
 /* Image shimmer sweep — mirrors admin globals.css so the ImageShimmer widget
- * behaves identically in both apps. */
+ * behaves identically in both apps. Drives a repeating gradient via
+ * background-position (with bg-[length:200%_100%]) so the highlight loops
+ * continuously to the right instead of translating off-screen and pausing. */
 @keyframes shimmer {
   0% {
-    transform: translateX(-100%);
+    background-position: -200% 0;
   }
   100% {
-    transform: translateX(100%);
+    background-position: 200% 0;
   }
 }
 

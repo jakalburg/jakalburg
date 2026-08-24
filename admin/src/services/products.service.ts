@@ -40,7 +40,9 @@ export interface CreateProductDto {
   tags?: string[];
   isNew?: boolean;
   onSale?: boolean;
+  /** @deprecated single slug — use `collections`. */
   collection?: string | null;
+  collections?: string[];
   essential?: boolean;
   description: string;
   fabric: string;
@@ -80,6 +82,7 @@ interface LeanProduct {
   isNew?: boolean;
   onSale?: boolean;
   collection?: string | null;
+  collections?: string[];
   essential?: boolean;
   description?: string;
   fabric?: string;
@@ -104,6 +107,8 @@ function toAdminProduct(p: LeanProduct): any {
 
   return {
     ...p,
+    // Collection membership (array of slugs) — the product form reads this.
+    collections: Array.isArray(p.collections) ? p.collections : [],
     // aliases the table/detail/form read
     name: p.title,
     originalPrice: hasCompare ? p.compareAtPrice : p.price,

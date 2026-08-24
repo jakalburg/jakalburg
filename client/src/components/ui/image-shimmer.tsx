@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImageOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -34,14 +34,27 @@ export function ImageShimmer({
 }: ImageShimmerProps) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
   const showFallback = failed || !src;
+
+  // If the image finishes loading before React attaches `onLoad` — common for
+  // cached images and after SSR hydration — the event is missed and the <img>
+  // would stay at opacity-0 forever. Reconcile against the DOM after mount (and
+  // whenever `src` changes): `complete` + `naturalWidth` reveal the real state.
+  useEffect(() => {
+    if (!src) return;
+    const img = imgRef.current;
+    if (!img || !img.complete) return;
+    if (img.naturalWidth > 0) setLoaded(true);
+    else setFailed(true);
+  }, [src]);
 
   return (
     <div className={cn("relative overflow-hidden bg-stone", wrapperClassName)}>
       {!loaded && !showFallback && (
         <div
           aria-hidden
-          className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/50 to-transparent"
+          className="absolute inset-0 animate-[shimmer_1.6s_linear_infinite] bg-gradient-to-r from-transparent via-white/60 to-transparent bg-[length:200%_100%]"
         />
       )}
       {showFallback ? (
@@ -50,6 +63,7 @@ export function ImageShimmer({
         </div>
       ) : (
         <img
+          ref={imgRef}
           src={src as string}
           alt={alt}
           loading={loading}

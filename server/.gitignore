@@ -23,3 +23,5 @@ dist/
 # Prisma generated schema (built from prisma/models/*.prisma)
 prisma/schema.prisma
 /generated/prisma
+.vercel
+.env*

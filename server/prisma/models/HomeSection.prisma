@@ -1,0 +1,23 @@
+// Editable homepage sections managed from the admin's Website → Home Setup tab.
+// Each section is one row keyed by a stable `type` (e.g. "HeroSlider"); its
+// section-specific content lives in the `data` Json blob (for HeroSlider that's
+// the ordered array of hero slides the storefront renders). Layout/visibility
+// toggles (enabled, order, gridBg, padding*) are plain columns the admin flips.
+model HomeSection {
+  id            String   @id @default(cuid())
+  type          String   @unique // stable section key, e.g. "HeroSlider"
+  title         String?
+  eyebrow       String?
+  subtitle      String?
+  enabled       Boolean  @default(true)
+  order         Int      @default(0)
+  gridBg        Boolean  @default(false)
+  paddingTop    Boolean  @default(true)
+  paddingBottom Boolean  @default(true)
+  fullBleed     Boolean  @default(false) // HeroSlider: full-bleed photo hero (on) vs split text+image layout (off)
+  data          Json? // section-specific content (HeroSlider: HeroSlide[])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([order])
+}

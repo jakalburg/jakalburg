@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import { clearAdminToken } from "./api/admin-token";
 
 // ---------------------------------------------------------------------------
 // Mock auth shim — drop-in stand-in for `next-auth/react` in the UI-only build.
@@ -84,6 +85,8 @@ export async function signOut(options?: {
   redirect?: boolean;
 }): Promise<{ url: string }> {
   const target = options?.callbackUrl || "/login";
+  // Drop the real admin JWT so realApi stops sending it after logout.
+  clearAdminToken();
   if (typeof window !== "undefined" && options?.redirect !== false) {
     window.location.assign(target);
   }

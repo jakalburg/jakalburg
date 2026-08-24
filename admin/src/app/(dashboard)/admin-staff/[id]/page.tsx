@@ -27,7 +27,11 @@ const formSchema = z.object({
   firstName: z.string().min(2, "First name must be at least 2 characters"),
   lastName: z.string().min(2, "Last name must be at least 2 characters"),
   email: z.string().email("Invalid email address"),
-  password: z.string().optional(),
+  // Blank = keep current password; if provided it may not contain spaces.
+  password: z
+    .string()
+    .refine((v) => !v || !/\s/.test(v), "Password must not contain spaces")
+    .optional(),
 });
 
 export default function EditAdminPage({
@@ -66,7 +70,7 @@ export default function EditAdminPage({
           });
         } else {
           toast.error("Admin not found");
-          router.push("/users/staff");
+          router.push("/admin-staff");
         }
       } catch (error) {
         toast.error("Failed to fetch admin details");
@@ -88,7 +92,7 @@ export default function EditAdminPage({
 
       await adminService(axiosAuth).update(resolvedParams.id, dataToUpdate);
       toast.success("Admin updated successfully");
-      router.push("/users/staff");
+      router.push("/admin-staff");
       router.refresh();
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to update admin");
@@ -103,7 +107,7 @@ export default function EditAdminPage({
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" asChild>
-          <Link href="/users/staff">
+          <Link href="/admin-staff">
             <ArrowLeft className="h-4 w-4" />
           </Link>
         </Button>

@@ -35,7 +35,10 @@ export interface Product {
   tags: string[];
   isNew?: boolean;
   onSale?: boolean;
+  /** @deprecated single slug — use `collections`. */
   collection?: string;
+  /** Collection slugs this product belongs to (many-to-many). */
+  collections?: string[];
   essential?: boolean;
   description: string;
   fabric: string;

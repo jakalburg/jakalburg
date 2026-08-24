@@ -1,0 +1,19 @@
+// Editorial groupings shown on the storefront ("Shop by mood" + /collections).
+// Managed from the admin. A product joins a collection by carrying the
+// collection's slug in its `collections` array (Product.collections) — the link
+// is slug-based (no join table), matching the lean string-association style used
+// elsewhere (category, fabric). A product can belong to many collections.
+model Collection {
+  id          String   @id @default(cuid())
+  slug        String   @unique // storefront link + product-membership key
+  title       String
+  subtitle    String? // short tagline shown under the title
+  image       String? // cover photo URL (Cloudinary upload or pasted)
+  description String? // longer copy for the collection page
+  enabled     Boolean  @default(true) // storefront visibility
+  order       Int      @default(0) // display order (ascending)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([enabled, order])
+}

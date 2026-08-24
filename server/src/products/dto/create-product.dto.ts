@@ -111,10 +111,20 @@ export class CreateProductDto {
   @IsBoolean()
   onSale?: boolean;
 
-  @ApiPropertyOptional({ example: 'summer-essentials' })
+  @ApiPropertyOptional({ example: 'summer-essentials', deprecated: true, description: 'DEPRECATED single slug; use `collections`.' })
   @IsOptional()
   @IsString()
   collection?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['summer-essentials', 'monochrome'],
+    description: 'Collection slugs this product belongs to (many-to-many).',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  collections?: string[];
 
   @ApiPropertyOptional({ example: false, description: 'Featured / essentials flag.' })
   @IsOptional()

@@ -60,8 +60,15 @@ export class ProductResponseDto {
   @ApiProperty({ example: false })
   onSale: boolean;
 
-  @ApiPropertyOptional({ example: 'summer-essentials' })
+  @ApiPropertyOptional({ example: 'summer-essentials', deprecated: true })
   collection?: string;
+
+  @ApiProperty({
+    type: [String],
+    example: ['summer-essentials', 'monochrome'],
+    description: 'Collection slugs this product belongs to.',
+  })
+  collections: string[];
 
   @ApiProperty({ example: false, description: 'Featured / essentials flag.' })
   essential: boolean;

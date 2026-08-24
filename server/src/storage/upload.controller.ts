@@ -20,6 +20,7 @@ import {
 import { UploadService } from './upload.service';
 import { ImageUploadResponseDto } from './dto/upload-response.dto';
 import { env } from '../config/env';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 
 /** Max images accepted in a single request — mirrors the admin form's cap. */
 export const MAX_IMAGES_PER_UPLOAD = 10;
@@ -32,8 +33,11 @@ export const MAX_IMAGES_PER_UPLOAD = 10;
  * NOTE: unguarded for now, matching the product write routes so the admin UI
  * (mock auth session) can call it. Add JwtAuthGuard + RolesGuard('admin')
  * before any non-local deployment.
+ *
+ * GUARDED: class-level @AdminOnly() — the storefront never uploads; admin-only.
  */
 @ApiTags('Uploads')
+@AdminOnly()
 @Controller('uploads')
 export class UploadController {
   constructor(private readonly upload: UploadService) {}

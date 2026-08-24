@@ -21,6 +21,11 @@ export const API_ENDPOINTS = {
     detail: (slug: string) => `/api/products/${encodeURIComponent(slug)}`,
     related: (slug: string) => `/api/products/${encodeURIComponent(slug)}/related`,
   },
+  // Editorial collections ("Shop by mood") managed from the admin. Public read;
+  // the storefront filters to the enabled ones client-side.
+  collections: {
+    list: "/api/collections",
+  },
   // The authenticated user's persistent cart — GET reads it, PUT replaces it
   // wholesale (the client mirrors its local cart up here).
   cart: {
@@ -40,5 +45,10 @@ export const API_ENDPOINTS = {
   addresses: {
     get: "/api/addresses",
     replace: "/api/addresses",
+  },
+  // Editable homepage content managed from the admin. `hero` returns the enabled
+  // hero slider's slides (empty array when none/disabled → static fallback).
+  website: {
+    hero: "/api/website/home-sections/hero",
   },
 } as const;

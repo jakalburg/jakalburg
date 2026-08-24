@@ -222,11 +222,11 @@ export function HomeSetupTab() {
     });
   };
 
-  const handleSaveSliderConfig = async (data: any) => {
+  const handleSaveSliderConfig = async (data: any, fullBleed: boolean) => {
     if (!activeSliderSection) return;
     const promise = updateMutation.mutateAsync({
       id: activeSliderSection.id,
-      data: { data },
+      data: { data, fullBleed },
     });
     toast.promise(promise, {
       loading: "Saving slider configuration...",
@@ -766,6 +766,7 @@ export function HomeSetupTab() {
           open={sliderConfigOpen}
           onOpenChange={setSliderConfigOpen}
           sectionData={activeSliderSection.data}
+          sectionFullBleed={activeSliderSection.fullBleed}
           onSave={handleSaveSliderConfig}
         />
       )}

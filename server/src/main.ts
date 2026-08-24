@@ -32,16 +32,21 @@ async function bootstrap() {
       }),
     );
 
-    const frontendUrls = env.FRONTEND_URL
-      ? env.FRONTEND_URL.split(',').map((url) => url.trim())
-      : [];
-    const frontendUrlsProd = env.FRONTEND_URL_PROD
-      ? env.FRONTEND_URL_PROD.split(',').map((url) => url.trim())
-      : [];
+    // Normalize each origin: split on commas, trim whitespace, strip any
+    // stray leading '='/quotes (a common paste error in the Vercel env editor),
+    // and drop a trailing slash so exact-match comparison stays robust.
+    const parseOrigins = (value?: string) =>
+      value
+        ? value
+            .split(',')
+            .map((url) => url.trim().replace(/^[=\s"']+/, '').replace(/\/+$/, ''))
+            .filter(Boolean)
+        : [];
 
-    const allowedOrigins = [...frontendUrls, ...frontendUrlsProd].filter(
-      Boolean,
-    );
+    const allowedOrigins = [
+      ...parseOrigins(env.FRONTEND_URL),
+      ...parseOrigins(env.FRONTEND_URL_PROD),
+    ];
 
     app.enableCors({
       origin: (origin, callback) => {

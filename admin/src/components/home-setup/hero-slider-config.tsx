@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Plus,
   Trash,
@@ -26,7 +27,6 @@ import { uploadService } from "@/services/upload.service";
 import { categoriesService } from "@/services/categories.service";
 import useAxiosAuth from "@/hooks/use-axios-auth";
 import { toast } from "sonner";
-import Image from "next/image";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -46,8 +46,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Switch } from "@/components/ui/switch";
 
+// An image-first hero slide: a background image OR video (with an optional
+// mobile variant) plus a target link (auto-filled from a category). No copy —
+// any headline/CTA is baked into the marketing image itself.
 export interface HeroSliderItem {
   id: string;
   image: string;
@@ -58,18 +60,8 @@ export interface HeroSliderItem {
   mobileImageFile?: File;
   mobileVideo?: string;
   mobileVideoFile?: File;
-  subtitle: string;
-  title: string;
-  buttonText: string;
-  showButton?: boolean;
   categoryId?: string;
   link: string;
-  navTitle: string;
-  navTitle_original?: string;
-  navIcon: string;
-  showNavIcon?: boolean;
-  showNavTitle?: boolean;
-  navIconFile?: File;
 }
 
 interface HeroCategory {
@@ -82,13 +74,17 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sectionData: HeroSliderItem[] | null;
-  onSave: (data: HeroSliderItem[]) => Promise<void>;
+  // Whether the hero currently renders as a full-bleed photo carousel (true) or
+  // the split text+image layout (false). Saved back alongside the slides.
+  sectionFullBleed?: boolean;
+  onSave: (data: HeroSliderItem[], fullBleed: boolean) => Promise<void>;
 }
 
 export function HeroSliderConfigModal({
   open,
   onOpenChange,
   sectionData,
+  sectionFullBleed = false,
   onSave,
 }: Props) {
   const videoUrlPattern = /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i;
@@ -98,13 +94,14 @@ export function HeroSliderConfigModal({
     /[?&](resource_type|type)=video\b/i.test(value);
   const api = useAxiosAuth();
   const [items, setItems] = useState<HeroSliderItem[]>([]);
+  const [fullBleed, setFullBleed] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [showExitPrompt, setShowExitPrompt] = useState(false);
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [uploadingField, setUploadingField] = useState<
-    "media" | "mobileMedia" | "navIcon" | null
+    "media" | "mobileMedia" | null
   >(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -141,27 +138,26 @@ export function HeroSliderConfigModal({
       setItems(
         Array.isArray(sectionData)
           ? sectionData.map((item) => ({
-              ...item,
+              id: item.id,
+              image: item.image || "",
+              video: item.video || "",
               mobileImage: item.mobileImage || "",
               mobileVideo: item.mobileVideo || "",
-              showButton: item.showButton !== false,
+              link: item.link || "",
               categoryId: item.categoryId || getCategoryIdFromLink(item.link),
-              showNavIcon: item.showNavIcon !== false,
-              showNavTitle: item.showNavTitle !== false,
             }))
           : [],
       );
+      setFullBleed(!!sectionFullBleed);
       setHasChanges(false);
     }
-  }, [open, sectionData]);
+  }, [open, sectionData, sectionFullBleed]);
 
   const validate = (): string | null => {
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      if (item.showButton !== false && !item.buttonText.trim())
-        return `Slide ${i + 1} is missing button text.`;
-      if (item.showNavTitle !== false && !item.navTitle.trim())
-        return `Slide ${i + 1} is missing a navigation title.`;
+      if (!item.image && !item.video)
+        return `Slide ${i + 1} needs a background image or video.`;
     }
     return null;
   };
@@ -181,16 +177,8 @@ export function HeroSliderConfigModal({
         video: "",
         mobileImage: "",
         mobileVideo: "",
-        subtitle: "",
-        title: "",
-        buttonText: "",
-        showButton: false,
         categoryId: "",
         link: "",
-        navTitle: "",
-        showNavIcon: false,
-        showNavTitle: false,
-        navIcon: "",
       },
     ]);
     setHasChanges(true);
@@ -205,19 +193,6 @@ export function HeroSliderConfigModal({
     id: string,
     field: keyof HeroSliderItem,
     value: string,
-  ) => {
-    setItems(
-      items.map((item) =>
-        item.id === id ? { ...item, [field]: value } : item,
-      ),
-    );
-    setHasChanges(true);
-  };
-
-  const handleToggle = (
-    id: string,
-    field: "showButton" | "showNavIcon" | "showNavTitle",
-    value: boolean,
   ) => {
     setItems(
       items.map((item) =>
@@ -271,10 +246,7 @@ export function HeroSliderConfigModal({
     setHasChanges(true);
   };
 
-  const triggerUpload = (
-    id: string,
-    field: "media" | "mobileMedia" | "navIcon",
-  ) => {
+  const triggerUpload = (id: string, field: "media" | "mobileMedia") => {
     setUploadingId(id);
     setUploadingField(field);
     fileInputRef.current?.click();
@@ -308,46 +280,21 @@ export function HeroSliderConfigModal({
     setHasChanges(true);
   };
 
-  const handleClearNavIcon = (id: string) => {
-    setItems(
-      items.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              navIcon: "",
-              navIconFile: undefined,
-            }
-          : item,
-      ),
-    );
-    setHasChanges(true);
-  };
-
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !uploadingId || !uploadingField) return;
 
-    if (uploadingField === "media" || uploadingField === "mobileMedia") {
-      const isImage = file.type.startsWith("image/");
-      const isVideo = file.type.startsWith("video/");
+    const isImage = file.type.startsWith("image/");
+    const isVideo = file.type.startsWith("video/");
 
-      if (!isImage && !isVideo) {
-        toast.error("Please upload a valid image or video file.");
-        setUploadingId(null);
-        setUploadingField(null);
-        return;
-      }
-    }
-
-    if (uploadingField === "navIcon" && !file.type.startsWith("image/")) {
-      toast.error("Please upload a valid image file.");
+    if (!isImage && !isVideo) {
+      toast.error("Please upload a valid image or video file.");
       setUploadingId(null);
       setUploadingField(null);
       return;
     }
 
     const previewUrl = URL.createObjectURL(file);
-    const isVideo = file.type.startsWith("video/");
 
     setItems(
       items.map((item) =>
@@ -360,18 +307,12 @@ export function HeroSliderConfigModal({
                 video: isVideo ? previewUrl : "",
                 videoFile: isVideo ? file : undefined,
               }
-            : uploadingField === "mobileMedia"
-              ? {
-                  ...item,
-                  mobileImage: isVideo ? "" : previewUrl,
-                  mobileImageFile: isVideo ? undefined : file,
-                  mobileVideo: isVideo ? previewUrl : "",
-                  mobileVideoFile: isVideo ? file : undefined,
-                }
             : {
                 ...item,
-                navIcon: previewUrl,
-                navIconFile: file,
+                mobileImage: isVideo ? "" : previewUrl,
+                mobileImageFile: isVideo ? undefined : file,
+                mobileVideo: isVideo ? previewUrl : "",
+                mobileVideoFile: isVideo ? file : undefined,
               }
           : item,
       ),
@@ -410,7 +351,6 @@ export function HeroSliderConfigModal({
           if (item.video) initialUrls.push(item.video);
           if (item.mobileImage) initialUrls.push(item.mobileImage);
           if (item.mobileVideo) initialUrls.push(item.mobileVideo);
-          if (item.navIcon) initialUrls.push(item.navIcon);
         });
       }
 
@@ -420,7 +360,6 @@ export function HeroSliderConfigModal({
           let finalVideo = item.video;
           let finalMobileImage = item.mobileImage || "";
           let finalMobileVideo = item.mobileVideo || "";
-          let finalNavIcon = item.navIcon;
 
           if (item.imageFile) {
             const res = await uploadImage(item.imageFile);
@@ -446,39 +385,25 @@ export function HeroSliderConfigModal({
             finalMobileImage = "";
           }
 
-          if (item.navIconFile) {
-            const res = await uploadImage(item.navIconFile);
-            finalNavIcon = res.url || res.publicUrl || res.fileUrl || "";
-          }
-
           return {
             id: item.id,
             image: finalImage,
             video: finalVideo,
             mobileImage: finalMobileImage,
             mobileVideo: finalMobileVideo,
-            subtitle: item.subtitle,
-            title: item.title,
-            buttonText: item.buttonText,
-            showButton: item.showButton !== false,
             categoryId: item.categoryId || getCategoryIdFromLink(item.link),
             link: item.link,
-            navTitle: item.navTitle,
-            showNavIcon: item.showNavIcon !== false,
-            showNavTitle: item.showNavTitle !== false,
-            navIcon: finalNavIcon,
           };
         }),
       );
 
-      // Find all final URLs to see which ones from the initial state have been removed
+      // Find all final URLs to see which ones from the initial state were removed
       const finalUrls = processedItems
         .flatMap((item) => [
           item.image,
           item.video,
           item.mobileImage,
           item.mobileVideo,
-          item.navIcon,
         ])
         .filter(Boolean);
       const removedUrls = initialUrls.filter((url) => !finalUrls.includes(url));
@@ -488,7 +413,7 @@ export function HeroSliderConfigModal({
         (e) => console.error("Failed to clean up old slider images", e),
       );
 
-      await onSave(processedItems);
+      await onSave(processedItems, fullBleed);
       setHasChanges(false);
       onOpenChange(false);
     } catch (error) {
@@ -514,11 +439,12 @@ export function HeroSliderConfigModal({
   return (
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="sm:max-w-[95vw] w-full max-h-[95vh] overflow-y-auto p-4 sm:p-6">
+        <DialogContent className="sm:max-w-[800px] w-full max-h-[95vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle>Hero Slider Configuration</DialogTitle>
             <DialogDescription>
-              Manage your homepage hero banners.
+              Add the images (or videos) shown in the homepage hero. Any headline
+              text should be part of the image itself.
             </DialogDescription>
           </DialogHeader>
 
@@ -526,18 +452,35 @@ export function HeroSliderConfigModal({
             type="file"
             className="hidden"
             ref={fileInputRef}
-            accept={
-              uploadingField === "media" || uploadingField === "mobileMedia"
-                ? "image/*,video/*"
-                : "image/*"
-            }
+            accept="image/*,video/*"
             onChange={handleFileChange}
           />
+
+          {/* Presentation toggle: full-bleed photo hero vs the split layout. */}
+          <div className="flex items-start justify-between gap-4 rounded-xl border bg-muted/30 p-4">
+            <div className="space-y-1">
+              <Label className="text-sm font-semibold">
+                Full-photo hero
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                On — the slide fills the hero edge-to-edge (full photo). Off — the
+                homepage shows the split layout: the headline &amp; buttons on the
+                left and these slide images beside them.
+              </p>
+            </div>
+            <Switch
+              checked={fullBleed}
+              onCheckedChange={(checked) => {
+                setFullBleed(checked);
+                setHasChanges(true);
+              }}
+            />
+          </div>
 
           <div className="space-y-6 py-4">
             {items.length === 0 ? (
               <div className="text-center p-8 border border-dashed rounded-lg text-muted-foreground">
-                No slides configured. Add your first slide above!
+                No slides configured. Add your first slide below!
               </div>
             ) : (
               items.map((item, index) => {
@@ -588,352 +531,187 @@ export function HeroSliderConfigModal({
                       </div>
                     </div>
 
+                    {/* Slide Background Media (image / video / URL) */}
+                    <div className="space-y-2">
+                      <Label className="text-sm">Slide Background Media</Label>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        Upload or paste an image/video URL. Images use 1920 x
+                        800; videos should be MP4/WebM/Ogg.
+                      </p>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                        <Input
+                          className="flex-1"
+                          value={currentMedia}
+                          onChange={(e) =>
+                            handleMediaUrlChange(item.id, e.target.value)
+                          }
+                          placeholder="https://...jpg or https://...mp4"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="w-full sm:w-auto px-4"
+                          onClick={() => triggerUpload(item.id, "media")}
+                        >
+                          <ImageIcon className="w-4 h-4 mr-2" />
+                          Upload Media
+                        </Button>
+                        {currentMedia && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-10 w-10"
+                            aria-label="Clear slide background media"
+                            onClick={() => handleClearHeroMedia(item.id)}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                      {currentMedia && (
+                        <div className="mt-3 h-40 w-full bg-muted rounded-lg overflow-hidden relative border shadow-sm">
+                          {isCurrentMediaVideo ? (
+                            <video
+                              src={currentMedia}
+                              className="w-full h-full object-cover"
+                              autoPlay
+                              loop
+                              muted
+                              playsInline
+                            />
+                          ) : (
+                            <ImageShimmer
+                              src={currentMedia}
+                              alt="Preview"
+                              wrapperClassName="absolute inset-0"
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-                      {/* Left Column: Core Data */}
+                      {/* Link target (category → link) */}
                       <div className="space-y-4">
                         <div className="space-y-2">
-                          <Label>Main Title (e.g. Shine bright)</Label>
-                          <Input
-                            value={item.title}
-                            onChange={(e) =>
-                              handleChange(item.id, "title", e.target.value)
+                          <Label>Link Source (Main Categories)</Label>
+                          <Select
+                            value={
+                              item.categoryId ||
+                              getCategoryIdFromLink(item.link)
                             }
-                          />
-                        </div>
-                        <div className="grid grid-cols-1 gap-3">
-                          <div className="space-y-2">
-                            <Label>Subtitle</Label>
-                            <Input
-                              value={item.subtitle}
-                              onChange={(e) =>
-                                handleChange(
-                                  item.id,
-                                  "subtitle",
-                                  e.target.value,
-                                )
-                              }
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Link Source (Main Categories)</Label>
-                            <Select
-                              value={
-                                item.categoryId ||
-                                getCategoryIdFromLink(item.link)
-                              }
-                              onValueChange={(val) => {
-                                const selectedCat = mainCategories.find(
-                                  (category) => category.id === val,
-                                );
-                                if (selectedCat) {
-                                  const newItems = items.map((t) => {
-                                    if (t.id === item.id) {
-                                      return {
+                            onValueChange={(val) => {
+                              const selectedCat = mainCategories.find(
+                                (category) => category.id === val,
+                              );
+                              if (selectedCat) {
+                                const newItems = items.map((t) =>
+                                  t.id === item.id
+                                    ? {
                                         ...t,
-                                        buttonText: selectedCat.parent, // Use parent name as button text
                                         categoryId: selectedCat.id,
                                         link: `/shop?category=${selectedCat.id}`,
-                                      };
-                                    }
-                                    return t;
-                                  });
-                                  setItems(newItems);
-                                  setHasChanges(true);
-                                }
-                              }}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Auto-fill from category" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {mainCategories.map((cat) => (
-                                  <SelectItem key={cat.id} value={cat.id}>
-                                    {cat.parent}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 gap-3">
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between gap-2 flex-wrap">
-                              <Label className="text-sm">Button Text</Label>
-                              <div className="flex items-center gap-2">
-                                <Label
-                                  htmlFor={`show-button-${item.id}`}
-                                  className="text-xs text-muted-foreground"
-                                >
-                                  Display
-                                </Label>
-                                <Switch
-                                  id={`show-button-${item.id}`}
-                                  checked={item.showButton !== false}
-                                  onCheckedChange={(checked) =>
-                                    handleToggle(item.id, "showButton", checked)
-                                  }
-                                />
-                              </div>
-                            </div>
-                            <Input
-                              value={item.buttonText}
-                              onChange={(e) =>
-                                handleChange(
-                                  item.id,
-                                  "buttonText",
-                                  e.target.value,
-                                )
+                                      }
+                                    : t,
+                                );
+                                setItems(newItems);
+                                setHasChanges(true);
                               }
-                              disabled={item.showButton === false}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-sm">
-                              Target Link (Auto-filled by Category)
-                            </Label>
-                            <Input
-                              value={item.link || ""}
-                              onChange={(e) =>
-                                handleChange(item.id, "link", e.target.value)
-                              }
-                              placeholder="/shop"
-                              disabled
-                            />
-                          </div>
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Auto-fill link from a category (optional)" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {mainCategories.map((cat) => (
+                                <SelectItem key={cat.id} value={cat.id}>
+                                  {cat.parent}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
-                        <div className="space-y-2 pt-2">
-                          <Label className="text-sm">
-                            Slide Background Media
-                          </Label>
-                          <p className="text-xs text-muted-foreground mb-2">
-                            Upload or paste an image/video URL. Images use 1920
-                            x 800; videos should be MP4/WebM/Ogg.
+                        <div className="space-y-2">
+                          <Label className="text-sm">Target Link</Label>
+                          <Input
+                            value={item.link || ""}
+                            onChange={(e) =>
+                              handleChange(item.id, "link", e.target.value)
+                            }
+                            placeholder="/new-arrivals"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Auto-filled when you pick a category — or type any
+                            storefront path.
                           </p>
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                            <Input
-                              className="flex-1"
-                              value={currentMedia}
-                              onChange={(e) =>
-                                handleMediaUrlChange(item.id, e.target.value)
-                              }
-                              placeholder="https://...jpg or https://...mp4"
-                            />
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              className="w-full sm:w-auto px-4"
-                              onClick={() => triggerUpload(item.id, "media")}
-                            >
-                              <ImageIcon className="w-4 h-4 mr-2" />
-                              Upload Media
-                            </Button>
-                            {currentMedia && (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                className="h-10 w-10"
-                                aria-label="Clear slide background media"
-                                onClick={() => handleClearHeroMedia(item.id)}
-                              >
-                                <X className="w-4 h-4" />
-                              </Button>
-                            )}
-                          </div>
-                          {currentMedia && (
-                            <div className="mt-3 h-40 w-full bg-muted rounded-lg overflow-hidden relative border shadow-sm">
-                              {isCurrentMediaVideo ? (
-                                <video
-                                  src={currentMedia}
-                                  className="w-full h-full object-cover"
-                                  autoPlay
-                                  loop
-                                  muted
-                                  playsInline
-                                />
-                              ) : (
-                                <ImageShimmer
-                                  src={currentMedia}
-                                  alt="Preview"
-                                  wrapperClassName="absolute inset-0"
-                                />
-                              )}
-                            </div>
-                          )}
                         </div>
                       </div>
 
-                      {/* Right Column: Nav Data */}
-                      <div className="space-y-4 md:border-l md:pl-6">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between gap-3">
-                            <Label>
-                              Nav Title (Displays on Side thumbnails)
-                            </Label>
-                            <div className="flex items-center gap-2">
-                              <Label
-                                htmlFor={`show-nav-title-${item.id}`}
-                                className="text-xs text-muted-foreground"
-                              >
-                                Display text
-                              </Label>
-                              <Switch
-                                id={`show-nav-title-${item.id}`}
-                                checked={item.showNavTitle !== false}
-                                onCheckedChange={(checked) =>
-                                  handleToggle(item.id, "showNavTitle", checked)
-                                }
-                              />
-                            </div>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            Tip: Use &lt;br /&gt; for line breaks (e.g. Ring
-                            &lt;br /&gt;& Earring)
-                          </p>
+                      {/* Mobile media (optional) */}
+                      <div className="space-y-2 md:border-l md:pl-6">
+                        <Label className="text-sm">Mobile Hero Media</Label>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          Optional image/video shown only on mobile. Falls back
+                          to the slide background media when empty.
+                        </p>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                           <Input
-                            value={item.navTitle}
+                            className="flex-1"
+                            value={currentMobileMedia}
                             onChange={(e) =>
-                              handleChange(item.id, "navTitle", e.target.value)
+                              handleMediaUrlChange(
+                                item.id,
+                                e.target.value,
+                                "mobile",
+                              )
                             }
-                            disabled={item.showNavTitle === false}
+                            placeholder="https://...jpg or https://...mp4"
                           />
-                        </div>
-                        <div className="space-y-2 pt-2">
-                          <div className="flex items-center justify-between gap-3">
-                            <Label className="text-base">
-                              Nav Icon Image (Optional)
-                            </Label>
-                            <div className="flex items-center gap-2">
-                              <Label
-                                htmlFor={`show-nav-icon-${item.id}`}
-                                className="text-xs text-muted-foreground"
-                              >
-                                Display icon
-                              </Label>
-                              <Switch
-                                id={`show-nav-icon-${item.id}`}
-                                checked={item.showNavIcon !== false}
-                                onCheckedChange={(checked) =>
-                                  handleToggle(item.id, "showNavIcon", checked)
-                                }
-                              />
-                            </div>
-                          </div>
-                          <p className="text-xs text-muted-foreground mb-2">
-                            Recommended size: 100 x 100 (Square)
-                          </p>
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                            <Input
-                              className="flex-1"
-                              value={item.navIcon}
-                              onChange={(e) =>
-                                handleChange(item.id, "navIcon", e.target.value)
-                              }
-                              placeholder="https://..."
-                              disabled={item.showNavIcon === false}
-                            />
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              className="w-full sm:w-auto px-4"
-                              onClick={() => triggerUpload(item.id, "navIcon")}
-                              disabled={item.showNavIcon === false}
-                            >
-                              <ImageIcon className="w-4 h-4 mr-2" />
-                              Upload Icon
-                            </Button>
-                            {item.navIcon && (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                className="h-10 w-10"
-                                aria-label="Clear navigation icon image"
-                                onClick={() => handleClearNavIcon(item.id)}
-                                disabled={item.showNavIcon === false}
-                              >
-                                <X className="w-4 h-4" />
-                              </Button>
-                            )}
-                          </div>
-                          {item.showNavIcon !== false && item.navIcon && (
-                            <div className="mt-3 h-20 w-20 bg-muted rounded-lg overflow-hidden relative border shadow-sm">
-                              <Image
-                                src={item.navIcon}
-                                alt="Icon Preview"
-                                fill
-                                className="object-contain p-2"
-                                unoptimized
-                              />
-                            </div>
-                          )}
-                        </div>
-                        <div className="space-y-2 pt-2">
-                          <Label className="text-sm">Mobile Hero Media</Label>
-                          <p className="text-xs text-muted-foreground mb-2">
-                            Optional image/video used only on mobile. Falls back
-                            to the slide background media when empty.
-                          </p>
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                            <Input
-                              className="flex-1"
-                              value={currentMobileMedia}
-                              onChange={(e) =>
-                                handleMediaUrlChange(
-                                  item.id,
-                                  e.target.value,
-                                  "mobile",
-                                )
-                              }
-                              placeholder="https://...jpg or https://...mp4"
-                            />
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              className="w-full sm:w-auto px-4"
-                              onClick={() =>
-                                triggerUpload(item.id, "mobileMedia")
-                              }
-                            >
-                              <ImageIcon className="w-4 h-4 mr-2" />
-                              Upload Mobile
-                            </Button>
-                            {currentMobileMedia && (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                className="h-10 w-10"
-                                aria-label="Clear mobile hero media"
-                                onClick={() =>
-                                  handleClearHeroMedia(item.id, "mobile")
-                                }
-                              >
-                                <X className="w-4 h-4" />
-                              </Button>
-                            )}
-                          </div>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="w-full sm:w-auto px-4"
+                            onClick={() => triggerUpload(item.id, "mobileMedia")}
+                          >
+                            <ImageIcon className="w-4 h-4 mr-2" />
+                            Upload Mobile
+                          </Button>
                           {currentMobileMedia && (
-                            <div className="mt-3 h-52 w-full max-w-[220px] bg-muted rounded-lg overflow-hidden relative border shadow-sm">
-                              {isCurrentMobileMediaVideo ? (
-                                <video
-                                  src={currentMobileMedia}
-                                  className="w-full h-full object-cover"
-                                  autoPlay
-                                  loop
-                                  muted
-                                  playsInline
-                                />
-                              ) : (
-                                <ImageShimmer
-                                  src={currentMobileMedia}
-                                  alt="Mobile preview"
-                                  wrapperClassName="absolute inset-0"
-                                />
-                              )}
-                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-10 w-10"
+                              aria-label="Clear mobile hero media"
+                              onClick={() =>
+                                handleClearHeroMedia(item.id, "mobile")
+                              }
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
                           )}
                         </div>
+                        {currentMobileMedia && (
+                          <div className="mt-3 h-52 w-full max-w-[220px] bg-muted rounded-lg overflow-hidden relative border shadow-sm">
+                            {isCurrentMobileMediaVideo ? (
+                              <video
+                                src={currentMobileMedia}
+                                className="w-full h-full object-cover"
+                                autoPlay
+                                loop
+                                muted
+                                playsInline
+                              />
+                            ) : (
+                              <ImageShimmer
+                                src={currentMobileMedia}
+                                alt="Mobile preview"
+                                wrapperClassName="absolute inset-0"
+                              />
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

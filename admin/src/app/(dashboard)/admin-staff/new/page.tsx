@@ -26,7 +26,10 @@ const formSchema = z.object({
   firstName: z.string().min(2, "First name must be at least 2 characters"),
   lastName: z.string().min(2, "Last name must be at least 2 characters"),
   email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z
+    .string()
+    .min(6, "Password must be at least 6 characters")
+    .regex(/^\S+$/, "Password must not contain spaces"),
 });
 
 export default function NewAdminPage() {
@@ -49,7 +52,7 @@ export default function NewAdminPage() {
       setLoading(true);
       await adminService(axiosAuth).create(values);
       toast.success("Admin created successfully");
-      router.push("/users");
+      router.push("/admin-staff");
       router.refresh();
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Failed to create admin");
@@ -62,7 +65,7 @@ export default function NewAdminPage() {
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" asChild>
-          <Link href="/users">
+          <Link href="/admin-staff">
             <ArrowLeft className="h-4 w-4" />
           </Link>
         </Button>

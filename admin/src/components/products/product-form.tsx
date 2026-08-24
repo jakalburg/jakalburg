@@ -43,6 +43,10 @@ import { Product } from "@/types/product";
 import useAxiosAuth from "@/hooks/use-axios-auth";
 import { useAdminQuery } from "@/hooks/use-admin-query";
 import { productsService } from "@/services/products.service";
+import {
+  collectionsService,
+  type Collection,
+} from "@/services/collections.service";
 import { uploadProductImages } from "@/services/uploads.service";
 import { useFabrics } from "@/hooks/use-fabrics";
 import { cn } from "@/lib/utils";
@@ -94,7 +98,6 @@ const productFormSchema = z
       .min(0)
       .optional(),
     stock: rupees,
-    collection: z.string().optional(),
     description: z.string().min(10, "Description must be at least 10 characters"),
     fabric: z.string().min(1, "Fabric is required"),
     care: z.string().min(1, "Care instructions are required"),
@@ -169,6 +172,14 @@ export function ProductForm({
   const { data: fabricList = [] } = useFabrics();
   const fabricOptions = fabricList.map((f) => f.name);
 
+  // Admin-managed collections ("Shop by mood"). A product may belong to many;
+  // membership is stored on the product as an array of collection slugs.
+  const { data: collectionList = [] } = useAdminQuery<Collection[]>(
+    ["collections"],
+    () => collectionsService(axiosAuth).getAll(),
+    { showErrorToast: false },
+  );
+
   const p = product as any;
 
   // Arrays live outside RHF for simple add/remove UX.
@@ -188,6 +199,14 @@ export function ProductForm({
       ? p.soldOutSizes.filter((x: unknown) => typeof x === "string")
       : [],
   );
+  // Collection slugs this product belongs to. Prefer the array; fall back to the
+  // deprecated single `collection` slug so legacy products don't lose membership.
+  const [selectedCollections, setSelectedCollections] = useState<string[]>(() => {
+    if (Array.isArray(p?.collections)) {
+      return p.collections.filter((x: unknown) => typeof x === "string");
+    }
+    return typeof p?.collection === "string" && p.collection ? [p.collection] : [];
+  });
 
   const form = useForm<ProductFormValues>({
     resolver: zodResolver(productFormSchema),
@@ -198,7 +217,6 @@ export function ProductForm({
       price: p?.price ?? undefined,
       compareAtPrice: p?.compareAtPrice ?? undefined,
       stock: p?.stock ?? p?.stockQuantity ?? 0,
-      collection: p?.collection ?? "",
       description: p?.description ?? "",
       fabric: p?.fabric ?? "",
       care: p?.care ?? "",
@@ -286,7 +304,7 @@ export function ProductForm({
       compareAtPrice:
         data.compareAtPrice && data.compareAtPrice > 0 ? data.compareAtPrice : null,
       stock: data.stock,
-      collection: data.collection?.trim() ? data.collection.trim() : null,
+      collections: selectedCollections,
       description: data.description.trim(),
       fabric: data.fabric.trim(),
       care: data.care.trim(),
@@ -354,6 +372,21 @@ export function ProductForm({
         : sizeOptions.filter((x) => prev.includes(x) || x === s),
     );
   };
+
+  // Collection chips: every backend collection, plus any slug already on the
+  // product that no longer maps to a live collection (so editing never silently
+  // drops a membership). Options are {slug, label}.
+  const collectionOptions = [
+    ...collectionList.map((c) => ({ slug: c.slug, label: c.title })),
+    ...selectedCollections
+      .filter((slug) => !collectionList.some((c) => c.slug === slug))
+      .map((slug) => ({ slug, label: slug })),
+  ];
+
+  const toggleCollection = (slug: string) =>
+    setSelectedCollections((prev) =>
+      prev.includes(slug) ? prev.filter((x) => x !== slug) : [...prev, slug],
+    );
 
   const compareAt = form.watch("compareAtPrice");
   const price = form.watch("price");
@@ -448,19 +481,39 @@ export function ProductForm({
               />
             </div>
 
-            <FormField
-              control={form.control}
-              name="collection"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Collection (optional)</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Summer Essentials" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
+            <div className="space-y-2">
+              <Label>Collections (optional)</Label>
+              {collectionOptions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No collections yet — create some under Catalog → Collections.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {collectionOptions.map((c) => {
+                    const active = selectedCollections.includes(c.slug);
+                    return (
+                      <button
+                        key={c.slug}
+                        type="button"
+                        onClick={() => toggleCollection(c.slug)}
+                        aria-pressed={active}
+                        className={cn(
+                          "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors",
+                          active
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-input bg-background hover:bg-accent hover:text-accent-foreground",
+                        )}
+                      >
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-            />
+              <p className="text-sm text-muted-foreground">
+                Tap to add this product to one or more homepage collections.
+              </p>
+            </div>
           </CardContent>
         </Card>
 

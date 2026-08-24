@@ -17,6 +17,7 @@ import { FabricsService } from './fabrics.service';
 import { CreateFabricDto } from './dto/create-fabric.dto';
 import { UpdateFabricDto } from './dto/update-fabric.dto';
 import { FabricResponseDto } from './dto/fabric-response.dto';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 
 /**
  * FabricsController — the curated fabric list the admin manages and the product
@@ -41,6 +42,7 @@ export class FabricsController {
 
   /** Create a fabric. */
   @Post()
+  @AdminOnly()
   @ApiOperation({ summary: 'Admin: create a fabric' })
   @ApiCreatedResponse({ type: FabricResponseDto })
   create(@Body() dto: CreateFabricDto): Promise<FabricResponseDto> {
@@ -49,6 +51,7 @@ export class FabricsController {
 
   /** Update a fabric. */
   @Patch(':id')
+  @AdminOnly()
   @ApiOperation({ summary: 'Admin: update a fabric' })
   @ApiOkResponse({ type: FabricResponseDto })
   update(
@@ -60,6 +63,7 @@ export class FabricsController {
 
   /** Delete a fabric. */
   @Delete(':id')
+  @AdminOnly()
   @ApiOperation({ summary: 'Admin: delete a fabric' })
   @ApiOkResponse({ description: 'Deleted.' })
   remove(@Param('id') id: string): Promise<{ success: boolean; id: string }> {
