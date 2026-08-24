@@ -55,3 +55,21 @@ export function PageLoader({ className }: { className?: string }) {
     </div>
   );
 }
+
+// Full-screen dimmed barrier with a centered loader card. The single source of
+// truth for the app's blocking loader — used by the global RouteLoader and by
+// actions that must cover an async step before navigating (e.g. Google sign-in).
+export function FullScreenLoader({ label = "Loading" }: { label?: string }) {
+  return (
+    <div
+      role="status"
+      aria-label={label}
+      aria-live="polite"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-foreground/40 backdrop-blur-[1px]"
+    >
+      <div className="rounded-md border bg-card px-10 py-8 shadow-sm">
+        <Loader size={44} />
+      </div>
+    </div>
+  );
+}

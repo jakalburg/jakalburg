@@ -40,7 +40,7 @@ export class ProductsService {
 
     if (query.gender) where.gender = query.gender;
     if (query.category) where.category = query.category;
-    if (query.collection) where.collection = query.collection;
+    if (query.collection) where.collections = { has: query.collection };
     if (query.isNew !== undefined) where.isNew = query.isNew;
     if (query.onSale !== undefined) where.onSale = query.onSale;
     if (query.essential !== undefined) where.essential = query.essential;
@@ -148,6 +148,7 @@ export class ProductsService {
       isNew: p.isNew,
       onSale: p.onSale,
       collection: p.collection ?? undefined,
+      collections: p.collections ?? [],
       essential: p.essential,
       description: p.description,
       fabric: p.fabric,
@@ -185,6 +186,7 @@ export class ProductsService {
         isNew: dto.isNew ?? false,
         onSale: dto.onSale ?? false,
         collection: dto.collection ?? null,
+        collections: dto.collections ?? [],
         essential: dto.essential ?? false,
         description: dto.description,
         fabric: dto.fabric,
@@ -279,6 +281,7 @@ export class ProductsService {
     if (dto.isNew !== undefined) data.isNew = dto.isNew;
     if (dto.onSale !== undefined) data.onSale = dto.onSale;
     if (dto.collection !== undefined) data.collection = dto.collection;
+    if (dto.collections !== undefined) data.collections = dto.collections;
     if (dto.essential !== undefined) data.essential = dto.essential;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.fabric !== undefined) data.fabric = dto.fabric;

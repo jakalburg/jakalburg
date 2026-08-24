@@ -12,33 +12,31 @@ import Link from "next/link";
 
 import { collectionsService } from "@/services";
 import useAxiosAuth from "@/hooks/use-axios-auth";
-import { Collection } from "@/services/collections.service";
+import type { UpdateCollectionDto } from "@/services/collections.service";
+import { uploadProductImages } from "@/services/uploads.service";
 
 import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ImageUpload } from "@/components/products/image-upload";
 
 const collectionFormSchema = z.object({
-  name: z.string().min(1, "Collection name is required"),
+  title: z.string().min(1, "Title is required"),
+  subtitle: z.string().optional(),
   description: z.string().optional(),
   image: z.array(z.any()).optional(),
-  status: z.enum(["active", "inactive"]).optional(),
+  enabled: z.boolean(),
 });
 
 type CollectionFormValues = z.infer<typeof collectionFormSchema>;
@@ -63,34 +61,30 @@ export default function EditCollectionPage({
   const form = useForm<CollectionFormValues>({
     resolver: zodResolver(collectionFormSchema),
     defaultValues: {
-      name: "",
+      title: "",
+      subtitle: "",
       description: "",
       image: [],
-      status: "active",
+      enabled: true,
     },
   });
 
   useEffect(() => {
     if (collection) {
       form.reset({
-        name: collection.name,
+        title: collection.title,
+        subtitle: collection.subtitle || "",
         description: collection.description || "",
-        status: (collection.status as "active" | "inactive") || "active",
+        enabled: collection.enabled,
         image: collection.image
-          ? [
-              {
-                id: "existing",
-                url: collection.image,
-                isPrimary: true,
-              },
-            ]
+          ? [{ id: "existing", url: collection.image, isPrimary: true }]
           : [],
       });
     }
   }, [collection, form]);
 
   const updateMutation = useMutation({
-    mutationFn: (data: Partial<Collection>) =>
+    mutationFn: (data: UpdateCollectionDto) =>
       collectionsService(axiosAuth).update(resolvedParams.id, data),
     onSuccess: () => {
       toast.success("Collection updated successfully");
@@ -101,8 +95,10 @@ export default function EditCollectionPage({
       router.push("/collections");
     },
     onError: (error: any) => {
+      const msg =
+        error?.response?.data?.message ?? error?.message ?? "Something went wrong";
       toast.error("Failed to update collection", {
-        description: error.message,
+        description: Array.isArray(msg) ? msg.join(", ") : String(msg),
       });
     },
   });
@@ -110,13 +106,34 @@ export default function EditCollectionPage({
   const onSubmit = async (data: CollectionFormValues) => {
     setIsSubmitting(true);
     try {
-      const collectionData = {
-        name: data.name,
-        description: data.description || undefined,
-        status: data.status,
-      };
+      // Resolve the cover image: upload a freshly-picked file, keep an existing
+      // hosted URL, or clear it (empty string) when the user removed it.
+      let imageValue: string | undefined = undefined;
+      const picked = data.image?.[0];
+      if (picked?.file) {
+        const result = await uploadProductImages([picked.file]);
+        if (result.uploaded.length > 0) {
+          imageValue = result.uploaded[0].url;
+        } else {
+          toast.error("Image upload failed", {
+            description: result.failed.map((f) => f.fileName).join(", "),
+          });
+          return;
+        }
+      } else if (typeof picked?.url === "string" && /^https?:\/\//.test(picked.url)) {
+        imageValue = picked.url;
+      } else {
+        // No image in the field — explicitly clear it on the server.
+        imageValue = "";
+      }
 
-      await updateMutation.mutateAsync(collectionData);
+      await updateMutation.mutateAsync({
+        title: data.title.trim(),
+        subtitle: data.subtitle?.trim() || "",
+        description: data.description?.trim() || "",
+        image: imageValue,
+        enabled: data.enabled,
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -140,12 +157,8 @@ export default function EditCollectionPage({
           </Link>
         </Button>
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Edit Collection
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Update collection details
-          </p>
+          <h1 className="text-3xl font-bold tracking-tight">Edit Collection</h1>
+          <p className="text-muted-foreground mt-1">Update collection details</p>
         </div>
       </div>
 
@@ -159,15 +172,26 @@ export default function EditCollectionPage({
             <CardContent className="space-y-4">
               <FormField
                 control={form.control}
-                name="name"
+                name="title"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Collection Name *</FormLabel>
+                    <FormLabel>Title *</FormLabel>
                     <FormControl>
-                      <Input
-                        placeholder="e.g., Once Upon A Time"
-                        {...field}
-                      />
+                      <Input placeholder="e.g., Summer Essentials" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="subtitle"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Subtitle (optional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g., Lightweight layers" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -179,10 +203,11 @@ export default function EditCollectionPage({
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Description (Optional)</FormLabel>
+                    <FormLabel>Description (optional)</FormLabel>
                     <FormControl>
-                      <Input
-                        placeholder="Information about this collection"
+                      <Textarea
+                        rows={3}
+                        placeholder="Longer copy shown on the collection page."
                         {...field}
                       />
                     </FormControl>
@@ -191,23 +216,25 @@ export default function EditCollectionPage({
                 )}
               />
 
-              {/* Note: Image upload on edit is read-only visualization for now unless backend supports it */}
               <FormField
                 control={form.control}
                 name="image"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Collection Image</FormLabel>
-                    <div className="text-xs text-muted-foreground mb-2">
-                      (Image updates not fully supported in edit mode yet)
-                    </div>
+                    <FormLabel>Cover image</FormLabel>
                     <FormControl>
                       <ImageUpload
                         images={field.value || []}
                         onChange={field.onChange}
                         maxImages={1}
+                        showPrimary={false}
+                        replaceWhenFull
+                        inputId="collection-image-upload"
                       />
                     </FormControl>
+                    <FormDescription>
+                      A newly-picked image is uploaded to Cloudinary on save.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -215,25 +242,21 @@ export default function EditCollectionPage({
 
               <FormField
                 control={form.control}
-                name="status"
+                name="enabled"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Status</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="inactive">Inactive</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
+                  <FormItem className="flex items-center justify-between gap-4 rounded-lg border p-3">
+                    <div className="space-y-0.5">
+                      <FormLabel>Active</FormLabel>
+                      <FormDescription>
+                        Off = hidden from the storefront.
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
                   </FormItem>
                 )}
               />

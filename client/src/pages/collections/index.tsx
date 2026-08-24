@@ -2,9 +2,34 @@ import Link from "next/link";
 import SEO from "@/components/seo";
 import { SiteLayout } from "@/components/layout/SiteLayout";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
-import { collections } from "@/data/collections";
+import {
+  useCollections,
+  fetchEnabledCollections,
+  resolveCollections,
+  type ApiCollection,
+} from "@/hooks/useCollections";
 
-export default function CollectionsIndex() {
+// Seed the collections at build/revalidation so the grid paints immediately and
+// stays in sync with the admin. Resilient to a down backend (falls back to the
+// shipped static set via resolveCollections).
+export async function getStaticProps() {
+  let initialCollections: ApiCollection[] | null = null;
+  try {
+    initialCollections = await fetchEnabledCollections();
+  } catch {
+    initialCollections = null;
+  }
+  return { props: { initialCollections }, revalidate: 60 };
+}
+
+export default function CollectionsIndex({
+  initialCollections,
+}: {
+  initialCollections: ApiCollection[] | null;
+}) {
+  const { data } = useCollections(initialCollections ?? undefined);
+  const collections = resolveCollections(data);
+
   return (
     <>
       <SEO
@@ -36,7 +61,9 @@ export default function CollectionsIndex() {
                 />
                 <div className="mt-3">
                   <p className="text-lg font-medium">{c.title}</p>
-                  <p className="text-sm text-mute-text">{c.tagline}</p>
+                  {c.subtitle ? (
+                    <p className="text-sm text-mute-text">{c.subtitle}</p>
+                  ) : null}
                 </div>
               </Link>
             ))}

@@ -5,9 +5,15 @@ import {
   IsNotEmpty,
   IsOptional,
   IsEnum,
+  Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { OtpPurpose } from '@prisma/client';
+
+// Passwords may not contain any whitespace (space, tab, newline). `\S+` also
+// rejects an all-whitespace or empty value; length is enforced separately.
+export const NO_WHITESPACE = /^\S+$/;
+export const NO_WHITESPACE_MESSAGE = 'Password must not contain spaces';
 
 export class RegisterDto {
   @ApiProperty({ example: 'Amit', description: "User's first name." })
@@ -32,6 +38,7 @@ export class RegisterDto {
   })
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters long' })
+  @Matches(NO_WHITESPACE, { message: NO_WHITESPACE_MESSAGE })
   @IsNotEmpty()
   password: string;
 }
@@ -71,6 +78,7 @@ export class LoginWithPasswordDto {
 
   @ApiProperty({ example: 'hunter2pass', description: 'Account password.' })
   @IsString()
+  @Matches(NO_WHITESPACE, { message: NO_WHITESPACE_MESSAGE })
   @IsNotEmpty()
   password: string;
 }
@@ -110,6 +118,7 @@ export class ResetPasswordDto {
   })
   @IsString()
   @MinLength(8, { message: 'New password must be at least 8 characters long' })
+  @Matches(NO_WHITESPACE, { message: NO_WHITESPACE_MESSAGE })
   @IsNotEmpty()
   newPassword: string;
 }
@@ -122,6 +131,7 @@ export class SetPasswordDto {
   })
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters long' })
+  @Matches(NO_WHITESPACE, { message: NO_WHITESPACE_MESSAGE })
   @IsNotEmpty()
   password: string;
 }
@@ -143,5 +153,6 @@ export class ChangePasswordDto {
   @IsString()
   @IsNotEmpty()
   @MinLength(8, { message: 'New password must be at least 8 characters long' })
+  @Matches(NO_WHITESPACE, { message: NO_WHITESPACE_MESSAGE })
   newPassword: string;
 }

@@ -3,25 +3,76 @@ import SEO from "@/components/seo";
 import { SiteLayout } from "@/components/layout/SiteLayout";
 import { CollectionView } from "@/components/collection/CollectionView";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
-import { collections, findCollection, type Collection } from "@/data/collections";
+import { collections as staticCollections, findCollection } from "@/data/collections";
+import {
+  fetchEnabledCollections,
+  toDisplayCollection,
+  type CollectionDisplay,
+} from "@/hooks/useCollections";
 import { useProducts } from "@/hooks/useProducts";
 
-export const getStaticPaths: GetStaticPaths = () => ({
-  paths: collections.map((c) => ({ params: { slug: c.slug } })),
-  fallback: false,
-});
-
-export const getStaticProps: GetStaticProps<{ collection: Collection }> = ({ params }) => {
-  const collection = findCollection(String(params?.slug));
-  if (!collection) return { notFound: true };
-  return { props: { collection } };
+// Paths come from the live (enabled) collections so admin-created ones get pages
+// too; `fallback: "blocking"` builds any new slug on first request. If the
+// backend is unreachable at build, fall back to the shipped slugs.
+export const getStaticPaths: GetStaticPaths = async () => {
+  let slugs: string[];
+  try {
+    slugs = (await fetchEnabledCollections()).map((c) => c.slug);
+  } catch {
+    slugs = staticCollections.map((c) => c.slug);
+  }
+  return {
+    paths: slugs.map((slug) => ({ params: { slug } })),
+    fallback: "blocking",
+  };
 };
 
-export default function CollectionPage({ collection }: { collection: Collection }) {
+export const getStaticProps: GetStaticProps<{
+  collection: CollectionDisplay;
+}> = async ({ params }) => {
+  const slug = String(params?.slug);
+
+  let list: CollectionDisplay[] | null = null;
+  try {
+    list = (await fetchEnabledCollections()).map(toDisplayCollection);
+  } catch {
+    list = null; // backend down — fall back to shipped static data below
+  }
+
+  let collection: CollectionDisplay | undefined;
+  if (list) {
+    // Backend reachable: only enabled collections exist → a missing slug 404s
+    // (respects an admin disabling/deleting a collection).
+    collection = list.find((c) => c.slug === slug);
+  } else {
+    const s = findCollection(slug);
+    collection = s
+      ? {
+          slug: s.slug,
+          title: s.title,
+          subtitle: s.tagline,
+          description: s.description,
+          image: s.image,
+        }
+      : undefined;
+  }
+
+  if (!collection) return { notFound: true, revalidate: 60 };
+  return { props: { collection }, revalidate: 60 };
+};
+
+export default function CollectionPage({
+  collection,
+}: {
+  collection: CollectionDisplay;
+}) {
   const slug = collection.slug;
   const { data: products = [], isLoading } = useProducts();
   const filtered = products.filter(
-    (p) => p.collection === slug || (slug === "essentials" && p.essential),
+    (p) =>
+      p.collections?.includes(slug) ||
+      p.collection === slug ||
+      (slug === "essentials" && p.essential),
   );
   return (
     <>

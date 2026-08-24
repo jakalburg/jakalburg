@@ -1,119 +1,80 @@
 import { AxiosInstance } from "axios";
+import { realApi } from "@/lib/api/real-axios";
 
-export const ordersService = (api: AxiosInstance) => ({
+// ---------------------------------------------------------------------------
+// Orders service — wired to the real NestJS backend (like products / fabrics /
+// admin-staff / customers). Every call goes through `realApi`, NOT the mock axios
+// the rest of the admin still uses; the injected instance is ignored on purpose.
+//
+// Backend: server `OrdersAdminController` (@Controller('admin/orders')). The lean
+// store persists processing|shipped|delivered only; tracking/courier, offline
+// orders, and Google Sheets have no backing columns, so those calls are handled
+// gracefully client-side (see createManualOrder / syncSheet below).
+// ---------------------------------------------------------------------------
+
+export const ordersService = (_api: AxiosInstance) => ({
+  // Paged list. Server already returns the admin table shape
+  // ({items,total,skip,take,hasMore}); no client-side remap needed.
   async getAll(params?: {
     page?: number;
     limit?: number;
     status?: string;
     sort?: string;
   }) {
-    const response = await api.get("/orders", { params });
-    const data = response.data;
-
-    if (data.items) {
-      data.items = data.items.map((order: any) => ({
-        ...order,
-        orderNumber:
-          order.invoiceNumber ||
-          (order.invoiceSequence ? String(order.invoiceSequence).padStart(2, "0") : "") ||
-          order.id.slice(-8).toUpperCase(),
-        invoiceNumber: order.invoiceNumber,
-        invoiceSequence: order.invoiceSequence,
-        total: order.totalAmount,
-        customer: {
-          id: order.userId || "guest",
-          name: order.shippingAddress?.firstName
-            ? `${order.shippingAddress.firstName} ${order.shippingAddress.lastName || ""}`.trim()
-            : order.user?.email || "Guest",
-          email: order.shippingAddress?.email || order.user?.email || "",
-          totalOrders: 0,
-          totalSpent: 0,
-          createdAt: order.createdAt,
-        },
-        items: order.items || [],
-      }));
-    }
-
-    return data;
-  },
-
-  async getApprovedUnshippedOrders() {
-    const response = await api.get("/orders", {
-      params: {
-        status: "processing", // Approved/Confirmed orders
-        deliveryStatus: "pending", // Not yet shipped
-        limit: 100,
-      },
-    });
-
-    // Map response to usable format if needed, similar to getAll
-    return response.data.items || [];
-  },
-
-  // Get single order
-  async getById(id: string) {
-    const response = await api.get(`/orders/${id}`);
+    const response = await realApi.get("/admin/orders", { params });
     return response.data;
   },
 
-  // Update order status
+  // Approved (processing) orders awaiting shipment — used by the delivery flow.
+  async getApprovedUnshippedOrders() {
+    const response = await realApi.get("/admin/orders", {
+      params: { status: "processing", limit: 100 },
+    });
+    return response.data.items || [];
+  },
+
+  // Single order (detail shape).
+  async getById(id: string) {
+    const response = await realApi.get(`/admin/orders/${id}`);
+    return response.data;
+  },
+
+  // Update order status.
   async updateStatus(id: string, status: string, notifyCustomer = false) {
-    const response = await api.patch(`/orders/${id}/status`, {
+    const response = await realApi.patch(`/admin/orders/${id}/status`, {
       status,
       notifyCustomer,
     });
     return response.data;
   },
 
-  // Get recent orders
+  // Recent orders (dashboard).
   async getRecent(limit: number = 5) {
-    const response = await api.get("/orders", {
+    const response = await realApi.get("/admin/orders", {
       params: { limit, sort: "createdAt:desc" },
     });
-    const data = response.data.items || [];
-
-    return data.map((order: any) => ({
-      ...order,
-      orderNumber:
-        order.invoiceNumber ||
-        (order.invoiceSequence ? String(order.invoiceSequence).padStart(2, "0") : "") ||
-        order.id.slice(-8).toUpperCase(),
-      invoiceNumber: order.invoiceNumber,
-      invoiceSequence: order.invoiceSequence,
-      total: order.totalAmount,
-      customer: {
-        id: order.userId || "guest",
-        name: order.shippingAddress?.firstName
-          ? `${order.shippingAddress.firstName} ${order.shippingAddress.lastName || ""}`.trim()
-          : order.user?.email || "Guest",
-        email: order.shippingAddress?.email || order.user?.email || "",
-        totalOrders: 0,
-        totalSpent: 0,
-        createdAt: order.createdAt,
-      },
-      items: order.items || [],
-    }));
+    return response.data.items || [];
   },
 
-  // Get order details with full information (admin)
+  // Full detail (admin order page).
   async getDetails(id: string) {
-    const response = await api.get(`/orders/${id}/details`);
+    const response = await realApi.get(`/admin/orders/${id}/details`);
     return response.data;
   },
 
-  // Confirm order (pending → processing)
+  // Confirm order (→ processing).
   async confirm(id: string) {
-    const response = await api.patch(`/orders/${id}/confirm`);
+    const response = await realApi.patch(`/admin/orders/${id}/confirm`);
     return response.data;
   },
 
-  // Reject order
+  // Reject order (unsupported by the lean store — surfaces a clear 400).
   async reject(id: string, reason?: string) {
-    const response = await api.patch(`/orders/${id}/reject`, { reason });
+    const response = await realApi.patch(`/admin/orders/${id}/reject`, { reason });
     return response.data;
   },
 
-  // Ship order with tracking
+  // Ship order (status only; tracking fields aren't persisted).
   async ship(
     id: string,
     trackingData: {
@@ -122,26 +83,29 @@ export const ordersService = (api: AxiosInstance) => ({
       estimatedDelivery?: string;
     },
   ) {
-    const response = await api.patch(`/orders/${id}/ship`, trackingData);
+    const response = await realApi.patch(`/admin/orders/${id}/ship`, trackingData);
     return response.data;
   },
 
-  // Permanently delete order (optionally also removes its row from Google Sheets)
-  async delete(id: string, removeFromSheet?: boolean) {
-    const response = await api.delete(`/orders/${id}`, {
-      data: { removeFromSheet: removeFromSheet === true },
-    });
+  // Permanently delete an order. (removeFromSheet is a no-op — no Sheets here.)
+  async delete(id: string, _removeFromSheet?: boolean) {
+    const response = await realApi.delete(`/admin/orders/${id}`);
     return response.data;
   },
 
-  // Manually (re)sync this order to Google Sheets
-  async syncSheet(id: string) {
-    const response = await api.post(`/orders/${id}/sync-sheet`);
-    return response.data;
+  // Google Sheets isn't configured for this store — resolve as a friendly skip
+  // so the "Add to Sheet" buttons don't error.
+  async syncSheet(_id: string) {
+    return {
+      success: true,
+      skipped: true,
+      message: "Google Sheets sync isn't configured for this store.",
+    };
   },
 
-  // Create a manual/offline order
-  async createManualOrder(data: {
+  // Offline/manual orders require a customer account + product mapping the lean
+  // model can't yet express, so creation is not available here.
+  async createManualOrder(_data: {
     customerName: string;
     contact: string;
     email?: string;
@@ -153,8 +117,7 @@ export const ordersService = (api: AxiosInstance) => ({
     paymentStatus: string;
     orderDate?: string;
     orderNote?: string;
-  }) {
-    const response = await api.post("/orders/manual", data);
-    return response.data;
+  }): Promise<never> {
+    throw new Error("Offline order creation isn't available yet.");
   },
 });

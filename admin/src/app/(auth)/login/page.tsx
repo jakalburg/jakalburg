@@ -2,10 +2,8 @@
 
 import { useState, Suspense } from "react";
 import Image from "next/image";
-import { signIn, getSession } from "@/lib/mock-auth";
+import { loginAdmin, AdminLoginError } from "@/lib/api/admin-auth";
 import { useRouter, useSearchParams } from "next/navigation";
-import Cookies from "js-cookie";
-import { AUTH_SESSION_MAX_AGE } from "@/config/auth.constant";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,59 +23,22 @@ function LoginForm() {
     setIsLoading(true);
 
     try {
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Admin Login] Submitted credentials", {
-          email,
-          passwordLength: password.length,
-          passwordPreview: password ? "*".repeat(password.length) : "",
-          matchesExpectedAdminPassword: password === "admin@123",
-        });
-      }
+      // Real login against the NestJS server: verifies credentials + the admin
+      // role and stores the JWT that realApi attaches to every request.
+      await loginAdmin(email, password);
 
-      const result = await signIn("credentials", {
-        redirect: false,
-        email,
-        password,
-      });
-
-      if (process.env.NODE_ENV === "development") {
-        console.log("[Admin Login] NextAuth result", {
-          ok: result?.ok,
-          status: result?.status,
-          error: result?.error,
-        });
-      }
-
-      if (result?.error) {
-        toast.error("Invalid email or password");
-      } else {
-        const session = await getSession();
-
-        if (!session || result?.ok === false) {
-          toast.error(
-            "Failed to establish session. Please try again or check your network connection.",
-          );
-          return;
-        }
-
-        if ((session as any)?.accessToken) {
-          Cookies.set("admin_access_token", (session as any).accessToken, {
-            expires: AUTH_SESSION_MAX_AGE / (24 * 60 * 60),
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "Strict",
-          });
-        }
-
-        toast.success("Logged in successfully");
-        // Use router.refresh() first to update server state, then redirect
-        router.refresh();
-        // Small delay to ensure session is established
-        setTimeout(() => {
-          router.push(callbackUrl);
-        }, 500);
-      }
+      toast.success("Logged in successfully");
+      // Refresh server state, then redirect to the originally-requested page.
+      router.refresh();
+      setTimeout(() => {
+        router.push(callbackUrl);
+      }, 300);
     } catch (error) {
-      toast.error("Something went wrong");
+      toast.error(
+        error instanceof AdminLoginError
+          ? error.message
+          : "Something went wrong",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -102,7 +63,7 @@ function LoginForm() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="h-14 px-5 rounded-2xl border-gray-100 bg-gray-50/50 focus:bg-white focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all duration-300 text-base"
-            placeholder="admin@gmail.com"
+            placeholder="admin@jakalburgcreation.com"
           />
         </div>
         <div className="space-y-2">
@@ -119,7 +80,8 @@ function LoginForm() {
             autoComplete="current-password"
             required
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            // Passwords can't contain spaces — strip any typed/pasted whitespace.
+            onChange={(e) => setPassword(e.target.value.replace(/\s/g, ""))}
             className="h-14 px-5 rounded-2xl border-gray-100 bg-gray-50/50 focus:bg-white focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all duration-300 text-base"
             placeholder="••••••••"
           />

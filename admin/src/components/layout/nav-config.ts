@@ -55,8 +55,8 @@ export const navItems: NavItem[] = [
     label: "Logistics",
     icon: ClipboardList,
     subItems: [
-      { href: "/orders", label: "Orders", icon: ShoppingCart },
-      { href: "/delivery", label: "Delivery", icon: Truck },
+      { href: "/logistics/orders", label: "Orders", icon: ShoppingCart },
+      { href: "/logistics/delivery", label: "Delivery", icon: Truck },
       { href: "/logistics/alerts", label: "Alerts", icon: Bell },
     ],
   },

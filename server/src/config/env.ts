@@ -56,6 +56,12 @@ class Environment {
     const secret = process.env.JWT_SECRET;
     if (!secret) {
       console.error('CRITICAL: JWT_SECRET is missing from environment variables');
+      // Fail hard in production — signing tokens with a known placeholder would
+      // let anyone forge an admin JWT and defeat every route guard. Only fall
+      // back (dev convenience) when NOT in production.
+      if (this.isProduction) {
+        throw new Error('JWT_SECRET is required in production');
+      }
       return 'placeholder-secret-change-me';
     }
     return secret;

@@ -13,6 +13,31 @@ export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
 
+  // A sub-tab is active when the current path matches its href (or is nested
+  // under it). The first sub-tab is the default shown on the parent's own base
+  // path (e.g. /logistics renders Orders), so it lights up there too.
+  const isSubItemActive = (
+    subHref: string,
+    index: number,
+    parentBase: string,
+  ) => {
+    const base = subHref.split("?")[0];
+    if (pathname === base || pathname.startsWith(base + "/")) return true;
+    return index === 0 && pathname === parentBase;
+  };
+
+  // A top-level item is active when its own path matches, or (for a group) when
+  // any of its sub-tabs is active — so the group highlights on child routes
+  // whose paths live outside the parent (e.g. Users → /customers).
+  const isItemActive = (item: (typeof navItems)[number]) => {
+    const base = item.href.split("?")[0];
+    if (base === "/") return pathname === "/";
+    const selfActive = pathname === base || pathname.startsWith(base + "/");
+    const childActive =
+      item.subItems?.some((s, i) => isSubItemActive(s.href, i, base)) ?? false;
+    return selfActive || childActive;
+  };
+
   return (
     <aside
       className={cn(
@@ -61,9 +86,7 @@ export function Sidebar() {
       <nav className="flex-1 overflow-y-auto p-3 space-y-1 custom-scrollbar">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive =
-            (item.href !== "/" && pathname.startsWith(item.href)) ||
-            (item.href === "/" && pathname === "/");
+          const isActive = isItemActive(item);
 
           const hasExpandedState = isActive;
           const [isExpanded, setIsExpanded] = useState(hasExpandedState);
@@ -90,8 +113,10 @@ export function Sidebar() {
                   isActive && !item.subItems
                     ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium"
                     : "",
+                  // A group parent gets a subtle active treatment; the strong
+                  // primary highlight is reserved for the active sub-tab below.
                   item.subItems && isActive
-                    ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium"
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                     : item.subItems
                       ? "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                       : "",
@@ -116,11 +141,13 @@ export function Sidebar() {
               {/* Render Sub Items */}
               {!collapsed && item.subItems && isExpanded && (
                 <div className="flex flex-col gap-1 ml-6 pl-2 border-l border-sidebar-border mt-1 relative">
-                  {item.subItems.map((subItem) => {
+                  {item.subItems.map((subItem, subIndex) => {
                     const SubIcon = subItem.icon;
-                    const isSubItemActive =
-                      pathname === subItem.href ||
-                      pathname.startsWith(subItem.href);
+                    const subActive = isSubItemActive(
+                      subItem.href,
+                      subIndex,
+                      item.href.split("?")[0],
+                    );
 
                     return (
                       <Link
@@ -128,7 +155,7 @@ export function Sidebar() {
                         href={subItem.href}
                         className={cn(
                           "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
-                          isSubItemActive
+                          subActive
                             ? "bg-sidebar-primary text-sidebar-primary-foreground font-medium"
                             : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                         )}

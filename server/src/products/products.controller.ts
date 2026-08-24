@@ -28,6 +28,7 @@ import {
   UpdateProductDto,
   UpdateProductStatusDto,
 } from './dto/update-product.dto';
+import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 
 @ApiTags('Products')
 @Controller('products')
@@ -38,12 +39,13 @@ export class ProductsController {
   // Admin catalogue (read). Declared BEFORE the public `:slug` routes so the
   // literal `admin/*` segments win over the `:slug` catch-all.
   //
-  // NOTE: unguarded for now so the admin UI (mock auth session) can call them.
-  // Add JwtAuthGuard + RolesGuard('admin') before any non-local deployment.
+  // GUARDED: each admin route carries @AdminOnly() (valid admin JWT required).
+  // The public storefront reads below stay open.
   // ===========================================================================
 
   /** Paginated admin list (includes hidden products). */
   @Get('admin/list')
+  @AdminOnly()
   @ApiOperation({ summary: 'Admin: list products (paginated, includes hidden)' })
   @ApiOkResponse({ type: AdminProductListResponseDto })
   adminList(
@@ -66,6 +68,7 @@ export class ProductsController {
 
   /** Admin free-text search. */
   @Get('admin/search')
+  @AdminOnly()
   @ApiOperation({ summary: 'Admin: search products' })
   @ApiOkResponse({ type: AdminProductListResponseDto })
   adminSearch(
@@ -81,6 +84,7 @@ export class ProductsController {
 
   /** Admin: fetch a single product by id (visible or hidden). */
   @Get('admin/:id')
+  @AdminOnly()
   @ApiOperation({ summary: 'Admin: get a product by id' })
   @ApiOkResponse({ type: AdminProductResponseDto })
   @ApiNotFoundResponse({ description: 'No product with that id.' })
@@ -136,11 +140,12 @@ export class ProductsController {
   }
 
   // ===========================================================================
-  // Admin catalogue (write). Unguarded for now — see note above.
+  // Admin catalogue (write). Each route is @AdminOnly() — see note above.
   // ===========================================================================
 
   /** Create a product. */
   @Post()
+  @AdminOnly()
   @ApiOperation({ summary: 'Admin: create a product' })
   @ApiCreatedResponse({ type: AdminProductResponseDto })
   create(@Body() dto: CreateProductDto): Promise<AdminProductResponseDto> {
@@ -149,6 +154,7 @@ export class ProductsController {
 
   /** Bulk enable/disable. Declared before `:id` so `bulk-status` isn't read as an id. */
   @Patch('bulk-status')
+  @AdminOnly()
   @ApiOperation({ summary: 'Admin: bulk enable/disable products' })
   bulkStatus(@Body() dto: BulkProductStatusDto): Promise<{ count: number }> {
     return this.productsService.bulkUpdateStatus(dto.productIds, dto.isActive);
@@ -156,6 +162,7 @@ export class ProductsController {
 
   /** Toggle a single product's visibility. */
   @Patch(':id/status')
+  @AdminOnly()
   @ApiOperation({ summary: 'Admin: toggle product visibility' })
   @ApiOkResponse({ type: AdminProductResponseDto })
   @ApiNotFoundResponse({ description: 'No product with that id.' })
@@ -168,6 +175,7 @@ export class ProductsController {
 
   /** Update a product. */
   @Patch(':id')
+  @AdminOnly()
   @ApiOperation({ summary: 'Admin: update a product' })
   @ApiOkResponse({ type: AdminProductResponseDto })
   @ApiNotFoundResponse({ description: 'No product with that id.' })
@@ -180,6 +188,7 @@ export class ProductsController {
 
   /** Delete a product. */
   @Delete(':id')
+  @AdminOnly()
   @ApiOperation({ summary: 'Admin: delete a product' })
   @ApiOkResponse({ description: 'Deleted.' })
   @ApiNotFoundResponse({ description: 'No product with that id.' })

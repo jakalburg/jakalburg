@@ -300,20 +300,20 @@ export function ShopCategoryConfigModal({
                       </p>
                       <Select
                         value={getLinkParam(item.link, "collection") || "none"}
-                        onValueChange={(collectionId) => {
+                        onValueChange={(collectionSlug) => {
                           const selectedCollection = collections.find(
-                            (c: any) => c.id === collectionId,
+                            (c: any) => c.slug === collectionSlug,
                           );
                           const newItems = items.map((t) =>
                             t.id === item.id
                               ? {
                                   ...t,
                                   title: selectedCollection
-                                    ? selectedCollection.name
+                                    ? selectedCollection.title
                                     : t.title,
                                   link:
-                                    collectionId && collectionId !== "none"
-                                      ? `/shop?collection=${collectionId}`
+                                    collectionSlug && collectionSlug !== "none"
+                                      ? `/shop?collection=${collectionSlug}`
                                       : "/shop",
                                 }
                               : t,
@@ -328,8 +328,11 @@ export function ShopCategoryConfigModal({
                         <SelectContent>
                           <SelectItem value="none">None</SelectItem>
                           {collections.map((collection: any) => (
-                            <SelectItem key={collection.id} value={collection.id}>
-                              {collection.name}
+                            <SelectItem
+                              key={collection.id}
+                              value={collection.slug}
+                            >
+                              {collection.title}
                             </SelectItem>
                           ))}
                         </SelectContent>

@@ -90,10 +90,11 @@ export function ProductCard({ product }: { product: Product }) {
               "size-4 transition-colors",
               hydrated && inWishlist ? "text-red-500" : "text-foreground",
             )}
+            // Solid (filled) only when in the wishlist; otherwise an outline.
             // Inline fill wins over lucide's fill="none" attribute AND any
-            // stylesheet, and needs no Tailwind utility to be generated — so the
-            // heart is always solid (colour follows currentColor from text-*).
-            style={{ fill: "currentColor" }}
+            // stylesheet, and needs no Tailwind utility to be generated
+            // (colour follows currentColor from text-*).
+            style={{ fill: hydrated && inWishlist ? "currentColor" : "none" }}
             aria-hidden="true"
           />
         </button>

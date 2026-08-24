@@ -18,7 +18,8 @@ model Product {
   tags           String[] @default([])
   isNew          Boolean  @default(false)
   onSale         Boolean  @default(false)
-  collection     String? // free-text collection slug (e.g. "summer-essentials")
+  collection     String? // DEPRECATED legacy single slug; superseded by `collections`. Kept so existing rows aren't dropped; backfilled into `collections` on seed.
+  collections    String[] @default([]) // collection slugs this product belongs to (many-to-many via slug; see model Collection)
   essential      Boolean  @default(false) // "featured"/essentials flag used on home + collections
   description    String
   fabric         String
