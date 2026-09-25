@@ -35,9 +35,20 @@ import {
   useDeleteFabric,
 } from "@/hooks/use-fabrics";
 import type { Fabric } from "@/services/fabrics.service";
+import {
+  TablePagination,
+  TABLE_PAGE_SIZE,
+} from "@/components/admin/table-pagination";
 
 export default function FabricsPage() {
-  const { data: fabrics = [], isLoading, error } = useFabrics();
+  const [page, setPage] = useState(1);
+  const { data, isLoading, error } = useFabrics({
+    page,
+    limit: TABLE_PAGE_SIZE,
+  });
+  const fabrics = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
   const createMutation = useCreateFabric();
   const updateMutation = useUpdateFabric();
   const deleteMutation = useDeleteFabric();
@@ -323,6 +334,14 @@ export default function FabricsPage() {
               </div>
             ))}
           </div>
+
+          <TablePagination
+            currentPage={page}
+            totalPages={totalPages}
+            total={total}
+            onPageChange={setPage}
+            itemLabel="fabrics"
+          />
         </>
       )}
 

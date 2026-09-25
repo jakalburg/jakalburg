@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, Trash2, Loader2, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,35 +28,54 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { couponsService } from "@/services";
+import { couponsService, type Coupon } from "@/services";
 import { uploadService } from "@/services/upload.service";
 import { CouponImageUpload } from "@/components/coupons/coupon-image-upload";
 import useAxiosAuth from "@/hooks/use-axios-auth";
 
-const couponFormSchema = z.object({
-  couponCode: z.string().min(3, "Coupon code must be at least 3 characters"),
-  title: z.string().min(1, "Title is required"),
-  discountType: z.enum(["percentage", "fixed"]),
-  discountAmount: z.coerce.number().min(0, "Discount amount must be positive"),
-  minimumAmount: z.coerce.number().min(0, "Minimum amount must be positive"),
-  endDate: z.string().min(1, "End date is required"),
-  productType: z.string().optional(),
-  maxUsage: z
-    .union([z.coerce.number().min(1), z.literal("").transform(() => undefined)])
-    .optional(),
-  status: z.enum(["active", "inactive"]).optional(),
-  logo: z.string().optional(),
-});
+// Random code for the "magic" generate button. Uppercase (codes are stored
+// uppercase) and drawn from an unambiguous alphabet — no O/0/I/1 — so a customer
+// reading it off a banner can type it back without guessing. Prefix keeps it
+// recognisably a coupon rather than a random blob.
+function generateCouponCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let suffix = "";
+  for (let i = 0; i < 6; i++) {
+    suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return `SAVE-${suffix}`;
+}
+
+const couponFormSchema = z
+  .object({
+    couponCode: z.string().min(3, "Coupon code must be at least 3 characters"),
+    title: z.string().min(1, "Title is required"),
+    discountType: z.enum(["percentage", "fixed"]),
+    discountAmount: z.coerce.number().min(0, "Discount amount must be positive"),
+    minimumAmount: z.coerce.number().min(0, "Minimum amount must be positive"),
+    endDate: z.string().min(1, "End date is required"),
+    productType: z.string().optional(),
+    maxUsage: z
+      .union([z.coerce.number().min(1), z.literal("").transform(() => undefined)])
+      .optional(),
+    status: z.enum(["active", "inactive"]).optional(),
+    logo: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    // A percentage discount over 100% would give the whole order away (and then some).
+    if (data.discountType === "percentage" && data.discountAmount > 100) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["discountAmount"],
+        message: "Percentage discount can't exceed 100%",
+      });
+    }
+  });
 
 type CouponFormValues = z.infer<typeof couponFormSchema>;
 
 export default function EditCouponPage() {
-  const router = useRouter();
   const params = useParams();
-  const queryClient = useQueryClient();
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string>("");
   const couponId = params.id as string;
   const axiosAuth = useAxiosAuth();
 
@@ -65,43 +84,60 @@ export default function EditCouponPage() {
     queryFn: () => couponsService(axiosAuth).getById(couponId),
   });
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-96">Loading...</div>
+    );
+  }
+
+  if (!coupon) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        Coupon not found
+      </div>
+    );
+  }
+
+  // Render the form only once the coupon is loaded, and seed react-hook-form's
+  // defaultValues from it directly. The form (and its Radix <Select>s) then mount
+  // WITH the saved values already in place — a <Select> only reflects a value
+  // present at mount, so a post-mount form.reset() would leave "Discount Type" /
+  // "Status" showing their placeholder default instead of the DB value.
+  return <EditCouponForm coupon={coupon} couponId={couponId} />;
+}
+
+function EditCouponForm({
+  coupon,
+  couponId,
+}: {
+  coupon: Coupon;
+  couponId: string;
+}) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const axiosAuth = useAxiosAuth();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string>(coupon.logo || "");
+
   const form = useForm<CouponFormValues>({
     resolver: zodResolver(couponFormSchema) as any,
     defaultValues: {
-      couponCode: "",
-      title: "Discount Coupon",
-      discountType: "percentage",
-      discountAmount: 0,
-      minimumAmount: 0,
-      endDate: "",
-      productType: "all",
-      status: "active",
+      couponCode: coupon.couponCode,
+      title: coupon.title,
+      discountType: coupon.discountType || "percentage",
+      discountAmount: coupon.discountAmount,
+      minimumAmount: coupon.minimumAmount,
+      // Format date to YYYY-MM-DD for input[type="date"]
+      endDate: coupon.endDate
+        ? new Date(coupon.endDate).toISOString().split("T")[0]
+        : "",
+      productType: coupon.productType || "all",
+      maxUsage: coupon.maxUsage,
+      status: coupon.status,
+      logo: coupon.logo || "",
     },
   });
-
-  useEffect(() => {
-    if (coupon) {
-      // Format date to YYYY-MM-DD for input[type="date"]
-      const formattedDate = coupon.endDate
-        ? new Date(coupon.endDate).toISOString().split("T")[0]
-        : "";
-
-      setPreviewUrl(coupon.logo || "");
-
-      form.reset({
-        couponCode: coupon.couponCode,
-        title: coupon.title,
-        discountType: coupon.discountType || "percentage",
-        discountAmount: coupon.discountAmount,
-        minimumAmount: coupon.minimumAmount,
-        endDate: formattedDate,
-        productType: coupon.productType || "all",
-        maxUsage: coupon.maxUsage,
-        status: coupon.status,
-        logo: coupon.logo || "",
-      });
-    }
-  }, [coupon, form]);
 
   const updateMutation = useMutation({
     mutationFn: (data: Partial<CouponFormValues>) =>
@@ -159,12 +195,6 @@ export default function EditCouponPage() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-96">Loading...</div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -197,13 +227,34 @@ export default function EditCouponPage() {
                     <FormItem>
                       <FormLabel>Coupon Code *</FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="e.g., SAVE20"
-                          {...field}
-                          disabled={isSubmitting}
-                        />
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="e.g., SAVE20"
+                            {...field}
+                            disabled={isSubmitting}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="shrink-0"
+                            disabled={isSubmitting}
+                            title="Generate a random code"
+                            aria-label="Generate a random coupon code"
+                            onClick={() =>
+                              form.setValue("couponCode", generateCouponCode(), {
+                                shouldValidate: true,
+                                shouldDirty: true,
+                              })
+                            }
+                          >
+                            <Sparkles className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </FormControl>
-                      <FormDescription>Unique coupon code</FormDescription>
+                      <FormDescription>
+                        Unique coupon code — or hit the ✨ button for a random one
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -258,26 +309,39 @@ export default function EditCouponPage() {
                 <FormField
                   control={form.control as any}
                   name="discountAmount"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Discount Amount *</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          placeholder="e.g., 20"
-                          {...field}
-                          value={(field.value as string | number) ?? ""}
-                          disabled={isSubmitting}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {form.watch("discountType") === "percentage"
-                          ? "Percentage (%)"
-                          : "Amount (₹)"}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
+                  render={({ field }) => {
+                    const isPercentage =
+                      form.watch("discountType") === "percentage";
+                    return (
+                      <FormItem>
+                        <FormLabel>Discount Amount *</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={isPercentage ? 100 : undefined}
+                            placeholder="e.g., 20"
+                            {...field}
+                            value={(field.value as string | number) ?? ""}
+                            onChange={(e) => {
+                              // Hard-cap at 100 while percentage so you can't
+                              // even type a larger number.
+                              let v = e.target.value;
+                              if (isPercentage && v !== "" && Number(v) > 100) {
+                                v = "100";
+                              }
+                              field.onChange(v);
+                            }}
+                            disabled={isSubmitting}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {isPercentage ? "Percentage (0–100%)" : "Amount (₹)"}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    );
+                  }}
                 />
               </div>
 

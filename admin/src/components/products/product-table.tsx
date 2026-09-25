@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Product } from "@/types/product";
 import { useDeleteProduct } from "@/hooks/use-products";
@@ -49,12 +49,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  AddReviewDialog,
+  type ReviewTargetProduct,
+} from "@/components/catalog/add-review-dialog";
+import {
   MoreHorizontal,
   Pencil,
+  Star,
   Trash2,
   Eye,
   Search,
-  ChevronLeft,
   ChevronRight,
   Check,
   Loader2,
@@ -62,6 +66,7 @@ import {
   PowerOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TablePagination } from "@/components/admin/table-pagination";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -129,6 +134,11 @@ export function ProductTable({
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkStatusUpdating, setIsBulkStatusUpdating] = useState(false);
   const [statusPendingId, setStatusPendingId] = useState<string | null>(null);
+  // The product whose row menu opened "Add review". Held here rather than one
+  // dialog per row so only a single dialog is ever mounted.
+  const [reviewTarget, setReviewTarget] = useState<ReviewTargetProduct | null>(
+    null,
+  );
 
   const deleteProduct = useDeleteProduct();
   const queryClient = useQueryClient();
@@ -149,6 +159,13 @@ export function ProductTable({
 
   const withReturnQuery = (path: string) =>
     returnQuery ? `${path}?${returnQuery}` : path;
+
+  // "Select all" means the rows currently on screen, so a selection must never
+  // outlive the page it was made on — otherwise a bulk delete would silently
+  // hit products the admin can no longer see.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [currentPage, searchQuery, sortOption, categoryFilter, showDisabled]);
 
   // Selection helpers
   const allSelected =
@@ -653,6 +670,20 @@ export function ProductTable({
                             </Link>
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="cursor-pointer"
+                            onSelect={() =>
+                              setReviewTarget({
+                                id: product.id,
+                                name: product.name,
+                                thumbnail: product.thumbnail,
+                              })
+                            }
+                          >
+                            <Star className="w-4 h-4 mr-2" />
+                            Add Review
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
                               <DropdownMenuItem
@@ -1012,79 +1043,20 @@ export function ProductTable({
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 px-2 py-3">
-          <p className="text-sm text-muted-foreground">
-            Showing{" "}
-            <span className="font-medium">
-              {Math.min((currentPage - 1) * 10 + 1, total)}
-            </span>{" "}
-            –{" "}
-            <span className="font-medium">
-              {Math.min(currentPage * 10, total)}
-            </span>{" "}
-            of <span className="font-medium">{total}</span> products
-          </p>
-          <div className="flex items-center gap-2 flex-wrap">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1"
-              onClick={() => onPageChange?.(currentPage - 1)}
-              disabled={currentPage <= 1}
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span className="hidden sm:inline">Previous</span>
-            </Button>
-            <div className="flex items-center gap-1 flex-wrap">
-              {Array.from({ length: totalPages }, (_, i) => i + 1)
-                .filter(
-                  (p) =>
-                    p === 1 ||
-                    p === totalPages ||
-                    Math.abs(p - currentPage) <= 1,
-                )
-                .reduce<(number | "...")[]>((acc, p, idx, arr) => {
-                  if (idx > 0 && p - (arr[idx - 1] as number) > 1) {
-                    acc.push("...");
-                  }
-                  acc.push(p);
-                  return acc;
-                }, [])
-                .map((p, idx) =>
-                  p === "..." ? (
-                    <span
-                      key={`ellipsis-${idx}`}
-                      className="px-2 text-muted-foreground text-sm"
-                    >
-                      …
-                    </span>
-                  ) : (
-                    <Button
-                      key={p}
-                      variant={p === currentPage ? "default" : "outline"}
-                      size="sm"
-                      className="w-8 h-8 p-0"
-                      onClick={() => onPageChange?.(p as number)}
-                    >
-                      {p}
-                    </Button>
-                  ),
-                )}
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1"
-              onClick={() => onPageChange?.(currentPage + 1)}
-              disabled={currentPage >= totalPages}
-            >
-              <span className="hidden sm:inline">Next</span>
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-      )}
+      <TablePagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        total={total}
+        onPageChange={(p) => onPageChange?.(p)}
+        itemLabel="products"
+      />
+
+      {/* One shared dialog for every row — `reviewTarget` says which product. */}
+      <AddReviewDialog
+        open={Boolean(reviewTarget)}
+        onOpenChange={(open) => !open && setReviewTarget(null)}
+        product={reviewTarget}
+      />
     </div>
   );
 }

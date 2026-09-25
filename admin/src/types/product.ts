@@ -43,6 +43,8 @@ export interface Product {
   // Stats
   reviewCount?: number;
   reviewRating?: number;
+  /** When true, the storefront hides this product's reviews + star rating. */
+  reviewsHidden?: boolean;
   excitementScore?: number;
   viewCount?: number;
   popularityScore?: number;

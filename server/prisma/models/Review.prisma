@@ -1,0 +1,55 @@
+// Product reviews. Two kinds live in this table:
+//
+//   1. CUSTOMER reviews, written from the order detail page. Always carry both
+//      `userId` and `orderId` — the order is a DELIVERED one the reviewer owns
+//      and that contained the product (checked in ReviewsService). They start
+//      `pending` and need admin approval.
+//
+//   2. ADMIN reviews, added from the dashboard to seed a product page. No order
+//      backs them, so `orderId` is null; `authorName` carries the display name
+//      instead. They may optionally be attributed to a real customer via
+//      `userId`. They are created already `approved`.
+//
+// `@@unique([orderId, productId])` enforces one review per product per order for
+// case 1. Postgres treats NULLs as distinct in a unique index, so case 2 is
+// unconstrained by it — an admin can add as many reviews to a product as needed.
+//
+// Only `approved` rows are ever served to the storefront. Product.avgRating /
+// Product.reviewCount are denormalized aggregates over the approved set,
+// recomputed by ReviewsService whenever a row's status or existence changes.
+enum ReviewStatus {
+  pending
+  approved
+  rejected
+}
+
+model Review {
+  id        String       @id @default(cuid())
+  userId    String? // null for an admin review with a free-text author
+  user      User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderId   String? // the delivered order that entitles this review; null for admin reviews
+  order     Order?       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  rating    Int // 1–5 whole stars
+  comment   String? // optional free text, capped at 1000 chars by the DTO
+  status    ReviewStatus @default(pending)
+
+  // Admin-supplied author. Takes precedence over the linked user's profile when
+  // set, so the dashboard can publish under any display name.
+  authorName  String?
+  authorImage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orderId, productId])
+  @@index([productId, status])
+  // Product page pages approved reviews newest-first; the moderation list
+  // pages by status newest-first.
+  @@index([productId, status, createdAt])
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@index([userId])
+  @@index([status])
+}

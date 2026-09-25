@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { DataTable } from "@/components/admin/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +40,11 @@ import { useRouter } from "next/navigation";
 import { ShipOrderDialog } from "@/components/orders/ship-order-dialog";
 import { AddManualOrderDialog } from "@/components/orders/add-manual-order-dialog";
 import { Card } from "@/components/ui/card";
+import {
+  TablePagination,
+  TABLE_PAGE_SIZE,
+} from "@/components/admin/table-pagination";
+import { useDebounce } from "@/hooks/use-debounce";
 
 const statusColors = {
   pending: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
@@ -54,6 +59,14 @@ const statusColors = {
 };
 
 type SortKey = "date-desc" | "date-asc" | "amount-desc" | "amount-asc";
+
+/** Table sort key → the `sort` value the orders API understands. */
+const SORT_PARAM: Record<SortKey, string> = {
+  "date-desc": "newest",
+  "date-asc": "oldest",
+  "amount-desc": "total-desc",
+  "amount-asc": "total-asc",
+};
 type ReviewableOrder = {
   id?: string;
   invoiceNumber?: string | null;
@@ -85,11 +98,33 @@ export function OrdersTab() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sortKey, setSortKey] = useState<SortKey>("date-desc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
   const queryClient = useQueryClient();
   const router = useRouter();
 
-  // Fetch with a generous limit so search/filter works client-side
-  const { data, isLoading, error } = useOrders({ limit: 500 });
+  // Search is debounced so typing doesn't fire a request per keystroke.
+  const debouncedSearch = useDebounce(searchQuery, 300);
+
+  // Search, status filter, sort and paging all run in the database — the table
+  // only ever holds one page.
+  const { data, isLoading, error } = useOrders({
+    page,
+    limit: TABLE_PAGE_SIZE,
+    status: statusFilter,
+    search: debouncedSearch.trim() || undefined,
+    sort: SORT_PARAM[sortKey],
+  });
+
+  // Any change to the query context invalidates both the page number and the
+  // selection — page 7 may not exist under the new filter, and "select all"
+  // only ever means the rows on screen.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, statusFilter, sortKey]);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [page, debouncedSearch, statusFilter, sortKey]);
   const confirmMutation = useConfirmOrder();
   const rejectMutation = useRejectOrder();
   const deleteMutation = useDeleteOrder();
@@ -109,58 +144,11 @@ export function OrdersTab() {
   // confirmation is opened so a previous choice never silently carries over.
   const [removeFromSheet, setRemoveFromSheet] = useState(false);
 
-  const allOrders = (data as any)?.items || [];
-
-  const processedOrders = useMemo(() => {
-    let list = [...allOrders];
-
-    // Status filter
-    if (statusFilter !== "all") {
-      list = list.filter((o) => o.status?.toLowerCase() === statusFilter);
-    }
-
-    // Search
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter((o) => {
-        const address = o.shippingAddress;
-        const profile = o.user?.profiles?.[0];
-        const name = address?.firstName
-          ? `${address.firstName} ${address.lastName || ""}`.trim()
-          : profile
-            ? `${profile.firstName || ""} ${profile.lastName || ""}`.trim()
-            : "";
-        return (
-          o.id?.toLowerCase().includes(q) ||
-          o.id?.slice(-8).toLowerCase().includes(q) ||
-          o.invoiceNumber?.toLowerCase().includes(q) ||
-          getDisplayOrderNumber(o)?.toLowerCase().includes(q) ||
-          name.toLowerCase().includes(q) ||
-          o.user?.email?.toLowerCase().includes(q) ||
-          o.status?.toLowerCase().includes(q) ||
-          o.paymentMethod?.toLowerCase().includes(q)
-        );
-      });
-    }
-
-    // Sort
-    switch (sortKey) {
-      case "date-desc":
-        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        break;
-      case "date-asc":
-        list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-        break;
-      case "amount-desc":
-        list.sort((a, b) => (b.totalAmount || 0) - (a.totalAmount || 0));
-        break;
-      case "amount-asc":
-        list.sort((a, b) => (a.totalAmount || 0) - (b.totalAmount || 0));
-        break;
-    }
-
-    return list;
-  }, [allOrders, searchQuery, statusFilter, sortKey]);
+  // One page of orders, already filtered/sorted by the server.
+  const allOrders = (data as any)?.items ?? (data as any)?.data ?? [];
+  const processedOrders = allOrders;
+  const total = (data as any)?.total ?? allOrders.length;
+  const totalPages = (data as any)?.totalPages ?? 1;
 
   const handleConfirm = (order: any) => setConfirmAction({ type: "confirm", order });
   const handleReject = (order: any) => setConfirmAction({ type: "reject", order });
@@ -315,9 +303,13 @@ export function OrdersTab() {
         <div className="flex items-center gap-1.5 flex-wrap">
           <Badge
             variant="outline"
-            className={cn(statusColors[order.status as keyof typeof statusColors] || "")}
+            className={cn(
+              statusColors[
+                (order.adminStatus || order.status) as keyof typeof statusColors
+              ] || "",
+            )}
           >
-            {order.status}
+            {String(order.adminStatus || order.status || "").replace(/_/g, " ")}
           </Badge>
           {order.isManualOrder && (
             <Badge variant="outline" className="bg-violet-500/10 text-violet-600 border-violet-500/20 text-[10px]">
@@ -423,7 +415,7 @@ export function OrdersTab() {
         </Button>
       )}
       <span className="text-sm text-muted-foreground self-center ml-auto whitespace-nowrap">
-        {processedOrders.length} of {allOrders.length}
+        {processedOrders.length} of {total}
       </span>
       <Button size="sm" onClick={() => setAddOrderOpen(true)}>
         <Plus className="w-4 h-4 mr-1" />
@@ -508,6 +500,15 @@ export function OrdersTab() {
             getRowKey={(order: any) => order.id}
             onRowClick={handleOrderRowClick}
           />
+          {!isLoading && !error && (
+            <TablePagination
+              currentPage={page}
+              totalPages={totalPages}
+              total={total}
+              onPageChange={setPage}
+              itemLabel="orders"
+            />
+          )}
         </div>
       </div>
 
@@ -545,9 +546,14 @@ export function OrdersTab() {
                     </div>
                     <Badge
                       variant="outline"
-                      className={cn("text-xs", statusColors[order.status as keyof typeof statusColors] || "")}
+                      className={cn(
+                        "text-xs",
+                        statusColors[
+                          (order.adminStatus || order.status) as keyof typeof statusColors
+                        ] || "",
+                      )}
                     >
-                      {order.status}
+                      {String(order.adminStatus || order.status || "").replace(/_/g, " ")}
                     </Badge>
                     {order.isManualOrder && (
                       <Badge variant="outline" className="bg-violet-500/10 text-violet-600 border-violet-500/20 text-[10px]">
@@ -598,6 +604,15 @@ export function OrdersTab() {
               );
             })}
           </div>
+        )}
+        {!isLoading && !error && (
+          <TablePagination
+            currentPage={page}
+            totalPages={totalPages}
+            total={total}
+            onPageChange={setPage}
+            itemLabel="orders"
+          />
         )}
       </div>
 

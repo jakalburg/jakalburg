@@ -18,6 +18,14 @@ export type ProductCategory =
 export interface ProductColor {
   name: string;
   hex: string;
+  // Per-colour variant overrides. An empty array / undefined means "inherit the
+  // product-level value" — the PDP resolves the effective value at render time.
+  images?: string[];
+  sizes?: string[];
+  soldOutSizes?: string[];
+  price?: number;
+  compareAtPrice?: number;
+  stock?: number;
 }
 
 export interface Product {
@@ -43,6 +51,51 @@ export interface Product {
   description: string;
   fabric: string;
   care: string;
+  /** Mean of approved review ratings (1 dp). 0 when nobody has reviewed yet. */
+  avgRating?: number;
+  /** Number of approved reviews. */
+  reviewCount?: number;
+  /** When true, an admin has hidden this product's reviews + rating. */
+  reviewsHidden?: boolean;
+}
+
+export type ReviewStatus = "pending" | "approved" | "rejected";
+
+/** A published review as the storefront renders it. The author is trimmed to a
+ *  display name server-side — no email or full surname is ever sent. */
+export interface Review {
+  id: string;
+  productId: string;
+  rating: number;
+  comment?: string;
+  status: ReviewStatus;
+  author: { name: string; image?: string };
+  createdAt: string;
+}
+
+/** One of the signed-in user's own reviews, carrying the order it came from so
+ *  the order detail page can match it to the right line item. */
+export interface MyReview extends Review {
+  orderNumber: string;
+}
+
+/** `GET /api/reviews/product/:slug` — the list plus the aggregate above it. */
+export interface ProductReviewSummary {
+  /** When true, an admin has hidden reviews for this product — render nothing. */
+  hidden?: boolean;
+  /** Mean of every approved rating — not just the loaded page. */
+  average: number;
+  /** Total approved reviews — not just the loaded page. */
+  count: number;
+  /** Approved review count keyed by star value, "1".."5". Covers all reviews. */
+  distribution: Record<string, number>;
+  /** One page of reviews, newest first. */
+  reviews: Review[];
+  page?: number;
+  limit?: number;
+  totalPages?: number;
+  /** Whether more reviews exist beyond the loaded ones. */
+  hasMore?: boolean;
 }
 
 export interface CartItem {
@@ -76,7 +129,13 @@ export interface MockOrder {
   shipping: number;
   discount: number;
   total: number;
-  status: "processing" | "shipped" | "delivered";
+  status:
+    | "processing"
+    | "shipped"
+    | "delivered"
+    | "cancelled"
+    | "returned"
+    | "refunded";
   address: Address;
   email: string;
   paymentLabel: string;

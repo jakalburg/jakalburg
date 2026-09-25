@@ -1,8 +1,16 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { HomeSection, Prisma } from '@prisma/client';
+import { HomeSection, Prisma, WebsiteContact } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateHomeSectionDto } from './dto/update-home-section.dto';
+import { UpdateWebsiteContactDto } from './dto/update-website-contact.dto';
 import { DEFAULT_HOME_SECTIONS } from './home-sections.defaults';
+
+/** Seeded once, the first time anyone reads the Contact page content. */
+const DEFAULT_CONTACT: Prisma.WebsiteContactCreateInput = {
+  title: "We're here to help.",
+  formDescription:
+    'Questions about a piece, an order, or fit? Our care team responds within one business day.',
+};
 
 /**
  * WebsiteService — persistence for the editable home-page sections behind the
@@ -60,6 +68,27 @@ export class WebsiteService {
     if (dto.data !== undefined) data.data = dto.data ?? Prisma.JsonNull;
 
     return this.prisma.homeSection.update({ where: { id }, data });
+  }
+
+  /**
+   * The storefront Contact page content (public). It's a singleton row — created
+   * with sensible defaults on first read, so the admin/storefront never see null.
+   */
+  async getContact(): Promise<WebsiteContact> {
+    const existing = await this.prisma.websiteContact.findFirst();
+    if (existing) return existing;
+    return this.prisma.websiteContact.create({ data: DEFAULT_CONTACT });
+  }
+
+  /** Admin: patch the Contact page content (upserts the singleton). */
+  async updateContact(
+    dto: UpdateWebsiteContactDto,
+  ): Promise<WebsiteContact> {
+    const current = await this.getContact(); // ensures the row exists
+    return this.prisma.websiteContact.update({
+      where: { id: current.id },
+      data: dto,
+    });
   }
 
   /** Idempotently create any missing default sections; existing rows untouched. */

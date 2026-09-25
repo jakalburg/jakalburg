@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
@@ -16,8 +17,12 @@ import {
 import { CollectionsService } from './collections.service';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { UpdateCollectionDto } from './dto/update-collection.dto';
-import { CollectionResponseDto } from './dto/collection-response.dto';
+import {
+  CollectionListResponseDto,
+  CollectionResponseDto,
+} from './dto/collection-response.dto';
 import { AdminOnly } from '../auth/decorators/admin-only.decorator';
+import { PaginationQueryDto } from '../common/pagination';
 
 /**
  * CollectionsController — the storefront's editorial collections. `GET /` is a
@@ -33,12 +38,22 @@ import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 export class CollectionsController {
   constructor(private readonly collectionsService: CollectionsService) {}
 
-  /** List all collections (public read — storefront catalogue metadata). */
+  /** List collections (public read — storefront catalogue metadata).
+   *  Paginated, but defaults to a page big enough for the storefront nav to
+   *  render every collection in one request. */
   @Get()
-  @ApiOperation({ summary: 'List all collections (with product counts)' })
-  @ApiOkResponse({ type: [CollectionResponseDto] })
-  findAll(): Promise<CollectionResponseDto[]> {
-    return this.collectionsService.findAll();
+  @ApiOperation({
+    summary: 'List collections (with product counts)',
+    description:
+      'Paginated. Omitting `page`/`limit` returns up to 100 collections, ' +
+      'which is what the storefront nav reads; the admin table passes ' +
+      '`limit=10` for a normal paged table.',
+  })
+  @ApiOkResponse({ type: CollectionListResponseDto })
+  findAll(
+    @Query() pagination: PaginationQueryDto,
+  ): Promise<CollectionListResponseDto> {
+    return this.collectionsService.findAll(pagination);
   }
 
   /** Idempotently seed the 6 shipped collections + backfill product membership. */

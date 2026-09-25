@@ -17,7 +17,12 @@ export const API_ENDPOINTS = {
     hasPassword: "/api/auth/has-password",
   },
   products: {
+    // Paginated: accepts page/limit plus gender, category, collection, isNew,
+    // onSale, essential, size, color, ids, search and sort.
     list: "/api/products",
+    // Distinct sizes/colours across everything matching the same filters —
+    // the listing pages' filter chips, which a single page can't supply.
+    facets: "/api/products/meta/facets",
     detail: (slug: string) => `/api/products/${encodeURIComponent(slug)}`,
     related: (slug: string) => `/api/products/${encodeURIComponent(slug)}/related`,
   },
@@ -25,6 +30,11 @@ export const API_ENDPOINTS = {
   // the storefront filters to the enabled ones client-side.
   collections: {
     list: "/api/collections",
+  },
+  // Discount coupons. `validate` prices a code against the cart subtotal at
+  // checkout (server-authoritative — the client only ever sends the code).
+  coupons: {
+    validate: "/api/coupons/validate",
   },
   // The authenticated user's persistent cart — GET reads it, PUT replaces it
   // wholesale (the client mirrors its local cart up here).
@@ -40,6 +50,18 @@ export const API_ENDPOINTS = {
     mine: "/api/orders/me",
     detail: (orderNumber: string) => `/api/orders/${encodeURIComponent(orderNumber)}`,
   },
+  // Product reviews. `forProduct` is public and returns APPROVED reviews only
+  // (plus the star summary); everything else is scoped to the signed-in user,
+  // who may only review a product from an order of theirs that was delivered.
+  // New reviews start `pending` and surface on the storefront once an admin
+  // approves them in the dashboard.
+  reviews: {
+    forProduct: (slug: string) => `/api/reviews/product/${encodeURIComponent(slug)}`,
+    mine: "/api/reviews/me",
+    create: "/api/reviews",
+    update: (id: string) => `/api/reviews/${encodeURIComponent(id)}`,
+    delete: (id: string) => `/api/reviews/${encodeURIComponent(id)}`,
+  },
   // Saved address history for the authenticated user — GET + full-replace PUT,
   // mirrored the same way as the cart.
   addresses: {
@@ -50,5 +72,12 @@ export const API_ENDPOINTS = {
   // hero slider's slides (empty array when none/disabled → static fallback).
   website: {
     hero: "/api/website/home-sections/hero",
+    // Public Contact page content (details + copy), edited in the admin.
+    contact: "/api/website/contact",
+  },
+  // Storefront contact form + newsletter signup. Public POST; both feed the
+  // admin Contact inbox (discriminated by `type`: "contact_us" | "newsletter").
+  contact: {
+    submit: "/api/contact",
   },
 } as const;

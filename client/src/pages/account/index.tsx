@@ -9,11 +9,15 @@ import { useOrders } from "@/hooks/useOrders";
 import { useHydrated } from "@/hooks/useHydrated";
 import { formatDate, formatINR } from "@/lib/format";
 
+/** Orders shown in the account overview. */
+const RECENT_ORDERS = 3;
+
 export default function AccountOverview() {
   const hydrated = useHydrated();
   const user = useAppSelector(selectAuthUser);
-  const { data: orders = [] } = useOrders();
-  const recent = orders.slice(0, 3);
+  // The overview only shows the three most recent — ask for exactly those.
+  const { data: ordersPage } = useOrders({ limit: RECENT_ORDERS });
+  const recent = ordersPage?.data ?? [];
 
   return (
     <>

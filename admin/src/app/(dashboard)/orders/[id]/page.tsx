@@ -70,17 +70,19 @@ const statusColors = {
   refunded: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
 };
 
+// Selectable transition targets must match the server OrderStatus enum
+// (server/prisma/models/Order.prisma) 1:1 so every choice round-trips to the
+// stored value. Offering finer-grained labels (out_for_delivery/rejected/
+// rto_received/pending/confirmed) makes the backend fold them onto a coarser
+// state (shipped/cancelled/returned/processing) — storing a status the admin
+// never picked and then spuriously tripping the "status is unchanged" guard on
+// the next save.
 const orderStatusOptions = [
-  "pending",
-  "confirmed",
   "processing",
   "shipped",
-  "out_for_delivery",
   "delivered",
   "cancelled",
-  "rejected",
   "returned",
-  "rto_received",
   "refunded",
 ];
 
@@ -253,6 +255,11 @@ export default function OrderDetailsPage() {
     );
   }
 
+  // The status the admin actually sees and re-selects. The server collapses
+  // several admin labels onto one enum value, so it also returns `adminStatus`
+  // with the exact choice — prefer it, falling back to the enum for older orders.
+  const currentStatus = String(order.adminStatus || order.status || "");
+
   // Handlers
   const handleConfirm = () => {
     confirmMutation.mutate(order.id, {
@@ -284,7 +291,7 @@ export default function OrderDetailsPage() {
   };
 
   const handleStatusUpdate = () => {
-    const selectedStatus = newStatus || order.status;
+    const selectedStatus = newStatus || currentStatus;
     updateStatusMutation.mutate(
       {
         id: order.id,
@@ -294,6 +301,9 @@ export default function OrderDetailsPage() {
       {
         onSuccess: () => {
           setNotifyCustomer(false);
+          // Clear the pending pick so the selector snaps to the freshly saved
+          // status once the order refetches (instead of holding the old choice).
+          setNewStatus("");
         },
       },
     );
@@ -335,10 +345,10 @@ export default function OrderDetailsPage() {
         </div>
 
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" onClick={() => setInvoiceOpen(true)}>
+          {/* <Button variant="outline" onClick={() => setInvoiceOpen(true)}>
             <FileText className="w-4 h-4 mr-2" />
             View Invoice
-          </Button>
+          </Button> */}
           <Button
             variant="outline"
             onClick={handleSyncSheet}
@@ -601,10 +611,10 @@ export default function OrderDetailsPage() {
                 variant="outline"
                 className={cn(
                   "w-full justify-center py-1 text-base capitalize",
-                  statusColors[order.status as keyof typeof statusColors],
+                  statusColors[currentStatus as keyof typeof statusColors],
                 )}
               >
-                {formatStatusLabel(order.status)}
+                {formatStatusLabel(currentStatus)}
               </Badge>
               {order.rejectionReason && (
                 <div className="mt-4 p-3 bg-red-50 text-red-700 text-sm rounded-md border border-red-200">
@@ -613,12 +623,12 @@ export default function OrderDetailsPage() {
               )}
               <div className="space-y-2 pt-2 border-t">
                 <Label>Existing Status</Label>
-                <p className="text-sm font-medium">{formatStatusLabel(order.status)}</p>
+                <p className="text-sm font-medium">{formatStatusLabel(currentStatus)}</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="new-status">New Order Status</Label>
                 <Select
-                  value={newStatus || order.status}
+                  value={newStatus || currentStatus}
                   onValueChange={setNewStatus}
                   disabled={updateStatusMutation.isPending}
                 >
@@ -655,7 +665,7 @@ export default function OrderDetailsPage() {
                 onClick={handleStatusUpdate}
                 disabled={
                   updateStatusMutation.isPending ||
-                  (newStatus || order.status) === order.status
+                  (newStatus || currentStatus) === currentStatus
                 }
               >
                 {updateStatusMutation.isPending && (

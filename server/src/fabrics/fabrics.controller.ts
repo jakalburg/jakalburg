@@ -6,18 +6,24 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { FabricsService } from './fabrics.service';
 import { CreateFabricDto } from './dto/create-fabric.dto';
 import { UpdateFabricDto } from './dto/update-fabric.dto';
-import { FabricResponseDto } from './dto/fabric-response.dto';
+import {
+  FabricListResponseDto,
+  FabricResponseDto,
+} from './dto/fabric-response.dto';
 import { AdminOnly } from '../auth/decorators/admin-only.decorator';
+import { PaginationQueryDto } from '../common/pagination';
 
 /**
  * FabricsController — the curated fabric list the admin manages and the product
@@ -32,12 +38,19 @@ import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 export class FabricsController {
   constructor(private readonly fabricsService: FabricsService) {}
 
-  /** List all fabrics (public read — harmless catalogue metadata). */
+  /** List fabrics (public read — harmless catalogue metadata). */
   @Get()
-  @ApiOperation({ summary: 'List all fabrics' })
-  @ApiOkResponse({ type: [FabricResponseDto] })
-  findAll(): Promise<FabricResponseDto[]> {
-    return this.fabricsService.findAll();
+  @ApiOperation({
+    summary: 'List fabrics (paginated)',
+    description: 'Defaults to page 1 × 10 fabrics; `limit` is capped at 100.',
+  })
+  @ApiQuery({ name: 'search', required: false, description: 'Filter by name.' })
+  @ApiOkResponse({ type: FabricListResponseDto })
+  findAll(
+    @Query() pagination: PaginationQueryDto,
+    @Query('search') search?: string,
+  ): Promise<FabricListResponseDto> {
+    return this.fabricsService.findAll({ ...pagination, search });
   }
 
   /** Create a fabric. */

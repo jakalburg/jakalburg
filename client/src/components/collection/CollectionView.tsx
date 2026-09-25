@@ -1,12 +1,16 @@
-import { useMemo } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/router";
-import type { Product } from "@/types";
 import { ProductGrid } from "@/components/product/ProductGrid";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SlidersHorizontal } from "lucide-react";
+import {
+  useProductFacets,
+  useProductsInfinite,
+  type ProductListFilters,
+} from "@/hooks/useProducts";
 
 export type SortKey = "featured" | "newest" | "price-asc" | "price-desc";
 
@@ -20,8 +24,12 @@ interface Props {
   title: string;
   eyebrow?: string;
   description?: string;
-  products: Product[];
-  isLoading?: boolean;
+  /**
+   * Which slice of the catalogue this page shows (gender, category,
+   * collection, isNew, …). Size/colour/sort come from the URL and are merged
+   * in here, then all of it is sent to the API — nothing is filtered locally.
+   */
+  filters: ProductListFilters;
 }
 
 const sortLabels: Record<SortKey, string> = {
@@ -31,7 +39,7 @@ const sortLabels: Record<SortKey, string> = {
   "price-desc": "Price: high to low",
 };
 
-export function CollectionView({ title, eyebrow, description, products, isLoading }: Props) {
+export function CollectionView({ title, eyebrow, description, filters }: Props) {
   const router = useRouter();
   const search: CollectionSearch = {
     size: typeof router.query.size === "string" ? router.query.size : undefined,
@@ -39,33 +47,33 @@ export function CollectionView({ title, eyebrow, description, products, isLoadin
     sort: typeof router.query.sort === "string" ? (router.query.sort as SortKey) : undefined,
   };
 
-  const allSizes = useMemo(
-    () => Array.from(new Set(products.flatMap((p) => p.sizes))),
-    [products],
-  );
-  const allColors = useMemo(
-    () => Array.from(new Set(products.flatMap((p) => p.colors.map((c) => c.name)))),
-    [products],
-  );
+  // Filter chips list every size/colour in the matching set, which a single
+  // page of products can't tell us — hence the dedicated facets endpoint.
+  const { data: facets } = useProductFacets(filters);
+  const allSizes = facets?.sizes ?? [];
+  const allColors = facets?.colors ?? [];
 
-  const filtered = useMemo(() => {
-    let list = [...products];
-    if (search.size) list = list.filter((p) => p.sizes.includes(search.size!));
-    if (search.color)
-      list = list.filter((p) => p.colors.some((c) => c.name === search.color));
-    switch (search.sort) {
-      case "newest":
-        list.sort((a, b) => Number(!!b.isNew) - Number(!!a.isNew));
-        break;
-      case "price-asc":
-        list.sort((a, b) => a.price - b.price);
-        break;
-      case "price-desc":
-        list.sort((a, b) => b.price - a.price);
-        break;
-    }
-    return list;
-  }, [products, search.size, search.color, search.sort]);
+  const {
+    products,
+    total,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    error,
+  } = useProductsInfinite({
+    ...filters,
+    size: search.size,
+    color: search.color,
+    sort: search.sort,
+  });
+
+  // Changing a filter or sort restarts at page 1. React Query does this for us
+  // by keying on the filters, but the window is also scrolled back to the top
+  // so the shopper isn't dropped into the middle of a fresh result set.
+  useEffect(() => {
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  }, [search.size, search.color, search.sort]);
 
   const update = (patch: Partial<CollectionSearch>) => {
     const next: Record<string, string | string[] | undefined> = { ...router.query, ...patch };
@@ -75,7 +83,7 @@ export function CollectionView({ title, eyebrow, description, products, isLoadin
     void router.push({ pathname: router.pathname, query: next }, undefined, { shallow: true });
   };
 
-  const filters = (
+  const filterControls = (
     <div className="space-y-6">
       <div>
         <p className="eyebrow mb-3 text-mute-text">Size</p>
@@ -128,9 +136,7 @@ export function CollectionView({ title, eyebrow, description, products, isLoadin
 
       <div className="mb-6 flex items-center justify-between">
         <p className="text-xs text-mute-text">
-          {isLoading
-            ? "Loading…"
-            : `${filtered.length} ${filtered.length === 1 ? "piece" : "pieces"}`}
+          {isLoading ? "Loading…" : `${total} ${total === 1 ? "piece" : "pieces"}`}
         </p>
         <div className="flex items-center gap-2">
           <div className="lg:hidden">
@@ -145,7 +151,7 @@ export function CollectionView({ title, eyebrow, description, products, isLoadin
                 <SheetHeader>
                   <SheetTitle>Filters</SheetTitle>
                 </SheetHeader>
-                <div className="mt-6">{filters}</div>
+                <div className="mt-6">{filterControls}</div>
               </SheetContent>
             </Sheet>
           </div>
@@ -166,8 +172,17 @@ export function CollectionView({ title, eyebrow, description, products, isLoadin
       </div>
 
       <div className="grid gap-8 lg:grid-cols-[220px_1fr]">
-        <aside className="hidden lg:block">{filters}</aside>
-        <ProductGrid products={filtered} isLoading={isLoading} paginate />
+        <aside className="hidden lg:block">{filterControls}</aside>
+        <ProductGrid
+          products={products}
+          isLoading={isLoading}
+          paginate
+          hasMore={Boolean(hasNextPage)}
+          isLoadingMore={isFetchingNextPage}
+          onLoadMore={() => void fetchNextPage()}
+          total={total}
+          error={error}
+        />
       </div>
     </section>
   );

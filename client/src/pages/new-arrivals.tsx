@@ -1,10 +1,8 @@
 import SEO from "@/components/seo";
 import { SiteLayout } from "@/components/layout/SiteLayout";
 import { CollectionView } from "@/components/collection/CollectionView";
-import { useProducts } from "@/hooks/useProducts";
 
 export default function NewArrivalsPage() {
-  const { data: products = [], isLoading } = useProducts();
   return (
     <>
       <SEO
@@ -17,8 +15,7 @@ export default function NewArrivalsPage() {
           eyebrow="Newest first"
           title="New arrivals"
           description="Pieces newly added to the shop, from summer linens to fine merino knits."
-          products={products.filter((p) => p.isNew)}
-          isLoading={isLoading}
+          filters={{ isNew: true }}
         />
       </SiteLayout>
     </>

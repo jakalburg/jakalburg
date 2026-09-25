@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { DataTable } from "@/components/admin/data-table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { format } from "date-fns";
@@ -20,22 +21,34 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { useDebounce } from "@/hooks/use-debounce";
+import {
+  TablePagination,
+  TABLE_PAGE_SIZE,
+} from "@/components/admin/table-pagination";
 
 export default function CustomersPage() {
-  const { data: customers = [], isLoading, error } = useCustomers();
-  const { mutate: deleteCustomer } = useDeleteCustomer();
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
 
-  const filteredCustomers = useMemo(() => {
-    if (!searchQuery.trim()) return customers;
-    const q = searchQuery.toLowerCase();
-    return (customers as any[]).filter(
-      (c) =>
-        c.name?.toLowerCase().includes(q) ||
-        c.email?.toLowerCase().includes(q) ||
-        c.phone?.toLowerCase().includes(q),
-    );
-  }, [customers, searchQuery]);
+  const debouncedSearch = useDebounce(searchQuery, 300);
+
+  const { data, isLoading, error } = useCustomers({
+    page,
+    limit: TABLE_PAGE_SIZE,
+    search: debouncedSearch.trim() || undefined,
+  });
+  const { mutate: deleteCustomer } = useDeleteCustomer();
+
+  // Server-side search + paging; this is already the page to render.
+  const filteredCustomers = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
 
   const handleDelete = (id: string) => {
     deleteCustomer(id, {
@@ -83,6 +96,7 @@ export default function CustomersPage() {
         customer.phone ? (
           <a
             href={`tel:${customer.phone}`}
+            onClick={(e) => e.stopPropagation()}
             className="flex items-center gap-1.5 text-primary hover:underline font-medium"
           >
             <Phone className="w-3 h-3" />
@@ -123,6 +137,7 @@ export default function CustomersPage() {
               variant="ghost"
               size="icon"
               className="text-destructive hover:text-destructive/90"
+              onClick={(e) => e.stopPropagation()}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -180,7 +195,7 @@ export default function CustomersPage() {
           </Button>
         )}
         <span className="text-sm text-muted-foreground ml-auto">
-          {filteredCustomers.length} of {(customers as any[]).length} customers
+          {filteredCustomers.length} of {total} customers
         </span>
       </div>
 
@@ -192,7 +207,18 @@ export default function CustomersPage() {
         error={error}
         emptyMessage={searchQuery ? "No customers match your search" : "No customers found"}
         getRowKey={(customer: any) => customer.id}
+        onRowClick={(customer: any) => router.push(`/customers/${customer.id}`)}
       />
+
+      {!isLoading && !error && (
+        <TablePagination
+          currentPage={page}
+          totalPages={totalPages}
+          total={total}
+          onPageChange={setPage}
+          itemLabel="customers"
+        />
+      )}
     </div>
   );
 }

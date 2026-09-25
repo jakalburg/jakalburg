@@ -4,6 +4,10 @@
 // through getToken()/setToken()/clearToken() so serialization stays consistent.
 
 const TOKEN_KEY = "auth_token";
+// Where the redux auth slice persists the user object. Owned here alongside the
+// token so a forced sign-out can clear the whole client session in one place;
+// the slice imports this key so the two never drift apart.
+export const AUTH_USER_KEY = "auth_user";
 
 // Strip a trailing slash and a trailing "/api" so endpoint paths (which already
 // start with "/api/...") never double up (e.g. ".../api/api/auth/login").
@@ -34,6 +38,31 @@ export function clearToken(): void {
     window.localStorage.removeItem(TOKEN_KEY);
   } catch {
     /* ignore */
+  }
+}
+
+/**
+ * Fully sign the user out of the browser and bounce to the sign-in screen.
+ *
+ * Called when an authenticated request comes back 401 — the stored JWT is no
+ * longer accepted, so rather than let the user keep hitting the same wall we
+ * drop the whole session (token + persisted user) and send them to /login. The
+ * hard navigation also resets the redux store, which rehydrates from the (now
+ * cleared) storage as logged-out.
+ */
+function forceSignOut(): void {
+  if (typeof window === "undefined") return;
+  clearToken();
+  try {
+    window.localStorage.removeItem(AUTH_USER_KEY);
+  } catch {
+    /* ignore */
+  }
+  const { pathname, search } = window.location;
+  // Don't loop when we're already on the sign-in screen.
+  if (!pathname.startsWith("/login")) {
+    const redirect = encodeURIComponent(pathname + search);
+    window.location.assign(`/login?redirect=${redirect}`);
   }
 }
 
@@ -91,8 +120,10 @@ export async function apiFetch<T>(
   }
 
   if (!res.ok) {
-    // A 401 on an authenticated call means the stored token is stale — drop it.
-    if (res.status === 401 && auth) clearToken();
+    // A 401 on an authenticated call means the stored session is no longer
+    // valid — sign the user out completely and send them to the login screen so
+    // their next action can't hit the same error.
+    if (res.status === 401 && auth) forceSignOut();
     const record = (data ?? {}) as {
       message?: string | string[];
       requestId?: string;

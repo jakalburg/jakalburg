@@ -6,11 +6,13 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
@@ -18,6 +20,7 @@ import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 import { AdminResponseDto } from './dto/admin-response.dto';
 import { AdminOnly } from '../auth/decorators/admin-only.decorator';
+import { PaginationQueryDto } from '../common/pagination';
 
 /**
  * AdminController — administrator ("staff") management for the admin app's
@@ -38,12 +41,23 @@ import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
-  /** List all admins. */
+  /** One page of admins. */
   @Get('staff')
-  @ApiOperation({ summary: 'Admin: list all administrators' })
-  @ApiOkResponse({ type: [AdminResponseDto] })
-  findAll() {
-    return this.adminService.findAll();
+  @ApiOperation({
+    summary: 'Admin: list administrators (paginated)',
+    description: 'Defaults to page 1 × 10 admins; `limit` is capped at 100.',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description: 'Free text over name and email.',
+  })
+  @ApiOkResponse({ description: 'Paged administrators envelope.' })
+  findAll(
+    @Query() pagination: PaginationQueryDto,
+    @Query('search') search?: string,
+  ) {
+    return this.adminService.findAll({ ...pagination, search });
   }
 
   /** Fetch one admin by id. */

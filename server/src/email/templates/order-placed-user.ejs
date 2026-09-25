@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #333333; margin: 0; padding: 0; background-color: #ffffff; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; background-color: #ffffff; }
+    .header { background-color: #111111; color: #ffffff; padding: 24px 20px; text-align: center; border-radius: 8px 8px 0 0; }
+    .header h1 { margin: 0; font-size: 22px; font-weight: bold; letter-spacing: 0.5px; }
+    .content { background-color: #f9fafb; color: #333333; padding: 30px; border-radius: 0 0 8px 8px; }
+    .order-details { background-color: #ffffff; color: #333333; padding: 15px 18px; border-radius: 8px; margin: 18px 0; border: 1px solid #eef0f2; }
+    .order-details p { margin: 6px 0; }
+    .items-table { width: 100%; border-collapse: collapse; margin-top: 14px; background-color: #ffffff; border: 1px solid #eef0f2; border-radius: 8px; overflow: hidden; table-layout: fixed; }
+    .items-table th { background-color: #f2f3f5; color: #111111; text-align: left; padding: 9px 8px; font-size: 12px; }
+    .items-table td { padding: 9px 8px; border-bottom: 1px solid #f3f4f6; font-size: 12px; line-height: 1.35; vertical-align: middle; overflow-wrap: anywhere; }
+    .items-table tr:last-child td { border-bottom: none; }
+    .item-img { width: 52px; height: 52px; object-fit: cover; border-radius: 6px; display: block; }
+    .product-name { font-weight: 700; color: #111827; }
+    .variant { color: #6b7280; font-size: 11px; }
+    .qty-cell, .price-cell { white-space: nowrap; }
+    .totals { width: 100%; margin-top: 16px; font-size: 13px; }
+    .totals td { padding: 4px 0; }
+    .totals .label { color: #6b7280; }
+    .totals .value { text-align: right; }
+    .totals .grand td { padding-top: 10px; border-top: 1px solid #e5e7eb; font-weight: 700; font-size: 15px; color: #111111; }
+    .button, .button:link, .button:visited { display: inline-block; padding: 12px 22px; background-color: #111111; color: #ffffff !important; text-decoration: none !important; border-radius: 4px; margin-top: 22px; font-weight: 700; }
+    .footer { margin-top: 20px; text-align: center; color: #6b7280; font-size: 13px; }
+    @media only screen and (max-width: 480px) {
+      .container { width: 100% !important; padding: 0 !important; }
+      .content { padding: 22px 16px !important; }
+      .items-table th, .items-table td { padding: 7px 6px !important; font-size: 11px !important; }
+      .item-img { width: 44px !important; height: 44px !important; }
+      .button { display: block !important; text-align: center !important; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Order confirmed</h1>
+    </div>
+    <div class="content">
+      <h2 style="margin-top:0;">Hi <%= customerName %>,</h2>
+      <p>Thanks for shopping with <%= storeName %>! We've received your order and will let you know as soon as it ships.</p>
+
+      <div class="order-details">
+        <p><strong>Order number:</strong> <%= orderNumber %></p>
+        <p><strong>Order date:</strong> <%= orderDate %></p>
+        <p><strong>Payment:</strong> <%= paymentLabel %></p>
+      </div>
+
+      <% if (items && items.length > 0) { %>
+      <table class="items-table" role="presentation" cellpadding="0" cellspacing="0">
+        <thead>
+          <tr>
+            <th style="width:52px;">Item</th>
+            <th>Product</th>
+            <th style="width:34px;text-align:center;">Qty</th>
+            <th style="width:80px;text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% items.forEach(function (item) { %>
+          <tr>
+            <td style="width:52px;">
+              <% if (item.image) { %>
+                <img src="<%= item.image %>" alt="<%= item.name %>" class="item-img" width="52" height="52" />
+              <% } else { %>
+                <div style="width:52px;height:52px;background:#f3f4f6;border-radius:6px;"></div>
+              <% } %>
+            </td>
+            <td>
+              <div class="product-name"><%= item.name %></div>
+              <% if (item.size || item.color) { %>
+                <div class="variant"><%= [item.color, item.size].filter(Boolean).join(' · ') %></div>
+              <% } %>
+              <div class="variant"><%= item.quantity %> × <%= item.unitPriceFormatted %></div>
+            </td>
+            <td class="qty-cell" style="text-align:center;"><%= item.quantity %></td>
+            <td class="price-cell" style="text-align:right;"><%= item.lineTotalFormatted %></td>
+          </tr>
+          <% }); %>
+        </tbody>
+      </table>
+      <% } %>
+
+      <table class="totals" role="presentation" cellpadding="0" cellspacing="0">
+        <tr><td class="label">Subtotal</td><td class="value"><%= subtotal %></td></tr>
+        <tr><td class="label">Shipping</td><td class="value"><%= shipping %></td></tr>
+        <% if (discount) { %>
+        <tr><td class="label">Discount<% if (couponCode) { %> (<%= couponCode %>)<% } %></td><td class="value">− <%= discount %></td></tr>
+        <% } %>
+        <tr class="grand"><td>Total</td><td class="value"><%= total %></td></tr>
+      </table>
+
+      <div style="text-align:center;">
+        <a class="button" href="<%= orderUrl %>" bgcolor="#111111" style="display:inline-block;padding:12px 22px;background-color:#111111;color:#ffffff !important;text-decoration:none !important;border-radius:4px;font-weight:700;">View your order</a>
+      </div>
+    </div>
+    <div class="footer">
+      <p>&copy; <%= currentYear %> <%= storeName %>. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+
+</html>

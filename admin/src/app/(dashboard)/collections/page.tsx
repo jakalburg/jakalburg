@@ -22,20 +22,28 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  TablePagination,
+  TABLE_PAGE_SIZE,
+} from "@/components/admin/table-pagination";
 
 export default function CollectionsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const api = useAxiosAuth();
   const queryClient = useQueryClient();
 
-  const {
-    data: collections = [],
-    isLoading,
-    error,
-  } = useQuery({
-    queryKey: ["collections"],
-    queryFn: () => collectionsService(api).getAll(),
+  const [page, setPage] = useState(1);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["collections", page],
+    queryFn: () =>
+      collectionsService(api).getAll({ page, limit: TABLE_PAGE_SIZE }),
+    placeholderData: (previous) => previous,
   });
+
+  const collections = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => collectionsService(api).delete(id),
@@ -175,6 +183,16 @@ export default function CollectionsPage() {
         emptyMessage="No collections found"
         getRowKey={(collection) => collection.id}
       />
+
+      {!isLoading && !error && (
+        <TablePagination
+          currentPage={page}
+          totalPages={totalPages}
+          total={total}
+          onPageChange={setPage}
+          itemLabel="collections"
+        />
+      )}
     </div>
   );
 }

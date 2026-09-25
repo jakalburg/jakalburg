@@ -171,10 +171,10 @@ export function OrderInvoiceDialog({ order, open, onClose }: OrderInvoiceDialogP
             {/* HEADER */}
             <div style={s.header}>
               <div>
-                <div style={s.brandName}>Kay by Khushie</div>
+                <div style={s.brandName}>Jakalburg</div>
                 <div style={s.storeInfo}>
-                  <div>www.kaybykhushie.com</div>
-                  <div>kaybykhushie@gmail.com</div>
+                  <div>www.jakalburgcreation.com</div>
+                  <div>jakalmaacreation@gmail.com</div>
                 </div>
               </div>
               <div style={s.invoiceLabel}>Invoice</div>
@@ -381,7 +381,7 @@ export function OrderInvoiceDialog({ order, open, onClose }: OrderInvoiceDialogP
               <div style={s.policyBlock}>
                 <div>
                   <strong style={{ color: TEXT_DARK }}>Return / Exchange Policy:</strong>{" "}
-                  As per store policy mentioned on our website at www.kaybykhushie.com.
+                  As per store policy mentioned on our website at www.jakalburgcreation.com.
                 </div>
                 <div>
                   <strong style={{ color: TEXT_DARK }}>Generated on:</strong> {generatedOn}
@@ -390,8 +390,8 @@ export function OrderInvoiceDialog({ order, open, onClose }: OrderInvoiceDialogP
 
               {/* FOOTER */}
               <div style={s.footer}>
-                <div>Thank you for shopping with <span style={s.footerBrand}>Kay by Khushie</span>.</div>
-                <div>For support, contact us at <span style={{ color: BRAND_BLUE }}>kaybykhushie@gmail.com</span></div>
+                <div>Thank you for shopping with <span style={s.footerBrand}>Jakalburg</span>.</div>
+                <div>For support, contact us at <span style={{ color: BRAND_BLUE }}>jakalmaacreation@gmail.com</span></div>
                 <div style={{ marginTop: "4px", fontSize: "10px", color: "#9ca3af" }}>
                   This is a computer-generated invoice and does not require a signature.
                 </div>

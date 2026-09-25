@@ -72,6 +72,9 @@ export default function ConfirmationPage() {
                   <div className="border p-4">
                     <div className="flex justify-between"><span>Subtotal</span><span>{formatINR(order.subtotal)}</span></div>
                     <div className="flex justify-between"><span>Shipping</span><span>{order.shipping === 0 ? "Free" : formatINR(order.shipping)}</span></div>
+                    {order.discount > 0 && (
+                      <div className="flex justify-between text-destructive"><span>Discount</span><span>−{formatINR(order.discount)}</span></div>
+                    )}
                     <div className="mt-2 flex justify-between border-t pt-2 font-medium">
                       <span>Total</span><span>{formatINR(order.total)}</span>
                     </div>

@@ -4,18 +4,28 @@ import { SiteLayout } from "@/components/layout/SiteLayout";
 import { AccountShell } from "@/components/account/AccountShell";
 import { useOrders } from "@/hooks/useOrders";
 import { useHydrated } from "@/hooks/useHydrated";
+import { PageLoader } from "@/components/ui/loader";
 import { formatDate, formatINR } from "@/lib/format";
+import { Button } from "@/components/ui/button";
+import { ORDER_PAGE_SIZE } from "@/lib/pagination";
+import { useState } from "react";
 
 export default function OrdersList() {
   const hydrated = useHydrated();
-  const { data: orders = [], isLoading } = useOrders();
+  const [page, setPage] = useState(1);
+  const { data, isLoading } = useOrders({ page });
+  const orders = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
   return (
     <>
       <SEO title="My orders — Jakalburg" noIndex />
       <SiteLayout hideNewsletter>
         <AccountShell>
           <h2 className="text-xl">Orders</h2>
-          {!hydrated || isLoading ? null : orders.length === 0 ? (
+          {!hydrated || isLoading ? (
+            <PageLoader />
+          ) : orders.length === 0 ? (
             <p className="mt-4 text-sm text-mute-text">You haven&apos;t placed any orders yet.</p>
           ) : (
             <ul className="mt-6 divide-y border-y">
@@ -42,6 +52,37 @@ export default function OrdersList() {
                 </li>
               ))}
             </ul>
+          )}
+
+          {/* Only rendered when there is more than one page of history. */}
+          {hydrated && !isLoading && totalPages > 1 && (
+            <div className="mt-6 flex items-center justify-between gap-4">
+              <p className="text-xs text-mute-text">
+                Showing {(page - 1) * ORDER_PAGE_SIZE + 1}–
+                {Math.min(page * ORDER_PAGE_SIZE, total)} of {total}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((p) => p - 1)}
+                  disabled={page <= 1}
+                >
+                  Previous
+                </Button>
+                <span className="text-xs text-mute-text">
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={page >= totalPages}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
           )}
         </AccountShell>
       </SiteLayout>

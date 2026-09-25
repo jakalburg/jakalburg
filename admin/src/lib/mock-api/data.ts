@@ -483,10 +483,6 @@ export const mockContacts: Record<string, any[]> = {
     { id: "contact-2", name: "Rhea Kapoor", email: "rhea.kapoor@example.com", subject: "Ring sizing", message: "Do you offer resizing for the Solitaire Halo Ring?", type: "contact_us", status: "read", createdAt: T(2, 14, 30) },
     { id: "contact-3", name: "Sara Mehta", email: "sara.mehta@example.com", subject: "Bulk order", message: "I'm interested in a bulk order for a wedding. Can someone call me?", type: "contact_us", status: "unread", createdAt: T(3, 11, 5) },
   ],
-  get_in_touch: [
-    { id: "git-1", name: "Ananya Rao", email: "ananya.rao@example.com", message: "Love your festive collection! Any store in Pune?", type: "get_in_touch", status: "unread", createdAt: T(1, 16, 45) },
-    { id: "git-2", name: "Nisha Verma", email: "nisha.verma@example.com", message: "Please add more anklet designs.", type: "get_in_touch", status: "read", createdAt: T(5, 10, 0) },
-  ],
   newsletter: [
     { id: "nl-1", name: "", email: "priya.nair@example.com", message: "", type: "newsletter", status: "unread", createdAt: T(0, 6, 0) },
     { id: "nl-2", name: "", email: "tara.singh@example.com", message: "", type: "newsletter", status: "read", createdAt: T(1, 8, 20) },

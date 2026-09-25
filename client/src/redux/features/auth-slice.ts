@@ -1,12 +1,14 @@
 import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import { getLocalStorage, setLocalStorage } from "@/utils/localstorage";
-import { getToken, setToken, clearToken } from "@/lib/api-client";
+import { getToken, setToken, clearToken, AUTH_USER_KEY } from "@/lib/api-client";
 import type { AuthUser } from "@/types";
 import type { RootState } from "../store";
 
 // The user object is persisted as JSON under "auth_user"; the JWT is owned by
 // api-client (raw string under "auth_token") and reached via the token helpers.
-const AUTH_KEY = "auth_user";
+// The storage key is owned by api-client too so a forced sign-out clears the
+// same entry this slice writes.
+const AUTH_KEY = AUTH_USER_KEY;
 
 interface AuthState {
   user: AuthUser | null;

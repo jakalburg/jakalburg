@@ -85,7 +85,9 @@ function ProductsPageContent() {
 
   const products = data?.data ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.ceil(total / PAGE_SIZE);
+  // The server already computed this against the page size it actually applied
+  // (it clamps `limit`), so trust it rather than dividing `total` here.
+  const totalPages = data?.totalPages ?? 1;
 
   const handleOpenDefaults = () => {
     const saved = (settings as any)?.productPageDefaults;

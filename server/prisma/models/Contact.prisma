@@ -1,0 +1,28 @@
+// Storefront contact + newsletter submissions, surfaced in the admin Contact
+// inbox. One table, discriminated by `type`:
+//
+//   1. "contact_us"  — the /contact page form. Carries name + message (and an
+//      optional subject); the customer wants a reply.
+//   2. "newsletter"  — the footer/newsletter signup. Only `email` is set;
+//      name/subject/message stay null.
+//
+// `name` and `message` are therefore optional (a newsletter row has neither).
+// Rows start `unread`; an admin flips them to `read` from the dashboard. There
+// are no relations — a submission is standalone and outlives any user account.
+model Contact {
+  id      String  @id @default(cuid())
+  name    String? // null for newsletter signups
+  email   String
+  subject String? // contact_us only, and even then optional
+  message String? // null for newsletter signups
+  type    String // "contact_us" | "newsletter"
+  status  String  @default("unread") // "unread" | "read"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // The inbox pages one `type` at a time, newest-first.
+  @@index([type, createdAt])
+  @@index([status])
+  @@index([createdAt])
+}

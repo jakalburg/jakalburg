@@ -1,11 +1,16 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useRouter } from "next/router";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Search, ArrowUpLeft } from "lucide-react";
+import { Loader } from "@/components/ui/loader";
 import { useAppDispatch, useAppSelector } from "@/redux/hooks";
 import { setSearchOpen, selectUI } from "@/redux/features/ui-slice";
-import { useProducts } from "@/hooks/useProducts";
+import { useProductsPage } from "@/hooks/useProducts";
+import { useDebounce } from "@/hooks/useDebounce";
+
+/** Suggestions shown under the search box. */
+const SUGGESTION_LIMIT = 6;
 
 export function SearchOverlay() {
   const dispatch = useAppDispatch();
@@ -13,20 +18,27 @@ export function SearchOverlay() {
   const setOpen = (v: boolean) => dispatch(setSearchOpen(v));
   const [q, setQ] = useState("");
   const router = useRouter();
-  const { data: products = [] } = useProducts();
+  // Suggestions come from the API, debounced so typing doesn't fire a request
+  // per keystroke, and capped at SUGGESTION_LIMIT rows.
+  const debouncedQ = useDebounce(q, 300);
+  const trimmedQ = q.trim();
+  const term = debouncedQ.trim();
+  const { data: suggestions, isFetching } = useProductsPage(
+    { search: term || undefined, limit: SUGGESTION_LIMIT },
+    // Nothing typed yet — the overlay shows its "Popular" chips instead.
+    { enabled: Boolean(term) },
+  );
+  const results = term ? (suggestions?.data ?? []) : [];
 
-  const results = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    if (!term) return [];
-    return products
-      .filter(
-        (p) =>
-          p.title.toLowerCase().includes(term) ||
-          p.category.includes(term) ||
-          p.tags.some((t) => t.includes(term)),
-      )
-      .slice(0, 6);
-  }, [q, products]);
+  // Whether we're still resolving results for what's CURRENTLY in the box, with
+  // nothing to show yet. True while the debounce is catching up (`q` typed but
+  // not yet pushed into `term`) or the request for `term` is in flight. We gate
+  // the loader on this so "No matches" only appears once the search for the
+  // current text has actually come back empty — not during the typing/fetch gap.
+  const isSearching =
+    Boolean(trimmedQ) &&
+    results.length === 0 &&
+    (trimmedQ !== term || isFetching);
 
   // Run a search for a term — used by the form submit and by clicking a
   // suggestion row. The up-left arrow next to each row instead just writes the
@@ -62,7 +74,16 @@ export function SearchOverlay() {
           />
         </form>
         <div className="mt-4 max-h-80 overflow-y-auto">
-          {q && results.length === 0 && (
+          {isSearching && (
+            <div
+              className="flex items-center gap-2 py-3 text-sm text-mute-text"
+              aria-live="polite"
+            >
+              <Loader size={20} />
+              Searching…
+            </div>
+          )}
+          {trimmedQ && !isSearching && results.length === 0 && (
             <p className="text-sm text-mute-text">No matches for &quot;{q}&quot;.</p>
           )}
           {results.length > 0 && (
@@ -91,7 +112,7 @@ export function SearchOverlay() {
               ))}
             </ul>
           )}
-          {!q && (
+          {!trimmedQ && (
             <div>
               <p className="eyebrow mb-3 text-mute-text">Popular</p>
               <ul className="flex flex-wrap gap-2">

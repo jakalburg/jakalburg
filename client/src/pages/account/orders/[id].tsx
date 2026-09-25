@@ -6,7 +6,9 @@ import { AccountShell } from "@/components/account/AccountShell";
 import { Button } from "@/components/ui/button";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
 import { useOrder } from "@/hooks/useOrders";
+import { useMyReviews } from "@/hooks/useReviews";
 import { useHydrated } from "@/hooks/useHydrated";
+import { OrderItemReview } from "@/components/reviews/OrderItemReview";
 import { formatDate, formatINR } from "@/lib/format";
 
 export default function OrderDetail() {
@@ -14,7 +16,16 @@ export default function OrderDetail() {
   const id = typeof router.query.id === "string" ? router.query.id : "";
   const hydrated = useHydrated();
   const { data: order, isLoading } = useOrder(id);
+  // This order's reviews in one call, then matched to line items below —
+  // cheaper than a request per item and it keeps the list fresh after a submit.
+  // Scoping the request by order number bounds it to this order's line items
+  // rather than the customer's entire review history.
+  const { data: myReviews = [] } = useMyReviews(id);
   const ready = hydrated && router.isReady && !isLoading;
+
+  // productId → this order's review for it. The same piece bought twice keeps
+  // its two reviews on their own orders.
+  const reviewByProduct = new Map(myReviews.map((r) => [r.productId, r]));
 
   return (
     <>
@@ -44,14 +55,23 @@ export default function OrderDetail() {
                 <ul className="divide-y border-y">
                   {order.items.map((i) => (
                     <li key={`${i.productId}-${i.size}-${i.color}`} className="flex gap-4 py-4">
-                      <Link href={`/product/${i.slug}`} className="group flex flex-1 gap-4">
-                        <ImageShimmer src={i.image} alt="" aria-hidden="true" wrapperClassName="h-24 w-20" className="object-cover" />
-                        <div className="flex-1 text-sm">
+                      <ImageShimmer src={i.image} alt="" aria-hidden="true" wrapperClassName="h-24 w-20 shrink-0" className="object-cover" />
+                      <div className="min-w-0 flex-1 text-sm">
+                        <Link href={`/product/${i.slug}`} className="group block">
                           <p className="font-medium group-hover:underline">{i.title}</p>
                           <p className="text-xs text-mute-text">{i.color} · {i.size} · Qty {i.quantity}</p>
-                        </div>
-                      </Link>
-                      <p className="text-sm">{formatINR(i.price * i.quantity)}</p>
+                        </Link>
+                        {/* Review lives inside the item block, not the link —
+                            nesting buttons in an <a> is invalid and would swallow
+                            the clicks. */}
+                        <OrderItemReview
+                          item={i}
+                          orderNumber={order.id}
+                          orderStatus={order.status}
+                          review={reviewByProduct.get(i.productId)}
+                        />
+                      </div>
+                      <p className="shrink-0 text-sm">{formatINR(i.price * i.quantity)}</p>
                     </li>
                   ))}
                 </ul>

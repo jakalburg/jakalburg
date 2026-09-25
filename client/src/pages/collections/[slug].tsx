@@ -9,7 +9,6 @@ import {
   toDisplayCollection,
   type CollectionDisplay,
 } from "@/hooks/useCollections";
-import { useProducts } from "@/hooks/useProducts";
 
 // Paths come from the live (enabled) collections so admin-created ones get pages
 // too; `fallback: "blocking"` builds any new slug on first request. If the
@@ -67,13 +66,6 @@ export default function CollectionPage({
   collection: CollectionDisplay;
 }) {
   const slug = collection.slug;
-  const { data: products = [], isLoading } = useProducts();
-  const filtered = products.filter(
-    (p) =>
-      p.collections?.includes(slug) ||
-      p.collection === slug ||
-      (slug === "essentials" && p.essential),
-  );
   return (
     <>
       <SEO
@@ -99,11 +91,7 @@ export default function CollectionPage({
             />
           </div>
         </div>
-        <CollectionView
-          title={collection.title}
-          products={filtered}
-          isLoading={isLoading}
-        />
+        <CollectionView title={collection.title} filters={{ collection: slug }} />
       </SiteLayout>
     </>
   );

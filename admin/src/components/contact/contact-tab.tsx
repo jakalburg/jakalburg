@@ -40,20 +40,15 @@ import {
 import { format } from "date-fns";
 import { InboxIcon, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-
-interface Contact {
-  id: string;
-  name: string;
-  email: string;
-  subject?: string;
-  message: string;
-  type: string;
-  status: string;
-  createdAt: string;
-}
+import {
+  contactService,
+  type Contact,
+  type ContactType,
+  type ContactStatus,
+} from "@/services/contact.service";
 
 interface ContactTabProps {
-  type: "contact_us" | "get_in_touch" | "newsletter";
+  type: ContactType;
 }
 
 export function ContactTab({ type }: ContactTabProps) {
@@ -64,17 +59,12 @@ export function ContactTab({ type }: ContactTabProps) {
 
   const { data: contacts, isLoading } = useQuery({
     queryKey: ["contacts", type],
-    queryFn: async () => {
-      const { data } = await api.get(`/contact?type=${type}`);
-      return data as Contact[];
-    },
+    queryFn: () => contactService(api).getAll(type),
   });
 
   const updateStatusMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const { data } = await api.patch(`/contact/${id}/status`, { status });
-      return data;
-    },
+    mutationFn: ({ id, status }: { id: string; status: ContactStatus }) =>
+      contactService(api).updateStatus(id, status),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contacts", type] });
       toast.success("Status updated");
@@ -85,9 +75,7 @@ export function ContactTab({ type }: ContactTabProps) {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await api.delete(`/contact/${id}`);
-    },
+    mutationFn: (id: string) => contactService(api).remove(id),
     onSuccess: (_data, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ["contacts", type] });
       setSelectedContact((prev) => (prev?.id === deletedId ? null : prev));
@@ -140,7 +128,22 @@ export function ContactTab({ type }: ContactTabProps) {
           </TableHeader>
           <TableBody>
             {contacts.map((contact) => (
-              <TableRow key={contact.id}>
+              <TableRow
+                key={contact.id}
+                // Whole row opens the details dialog (newsletter rows have no
+                // message/detail, so they stay non-clickable). The Status and
+                // Actions cells stopPropagation so they still work on their own.
+                onClick={
+                  type !== "newsletter"
+                    ? () => setSelectedContact(contact)
+                    : undefined
+                }
+                className={
+                  type !== "newsletter"
+                    ? "cursor-pointer hover:bg-muted/50 transition-colors"
+                    : undefined
+                }
+              >
                 <TableCell className="whitespace-nowrap">
                   {format(new Date(contact.createdAt), "MMM d, yyyy h:mm a")}
                 </TableCell>
@@ -161,25 +164,22 @@ export function ContactTab({ type }: ContactTabProps) {
                   </TableCell>
                 )}
                 {type !== "newsletter" && (
-                  <TableCell
-                    className="cursor-pointer hover:bg-muted/50 transition-colors"
-                    onClick={() => setSelectedContact(contact)}
-                  >
+                  <TableCell>
                     <div
                       className="max-w-md line-clamp-2 text-sm break-all"
-                      title="Click to view full message"
+                      title="Click the row to view the full message"
                     >
                       {contact.message}
                     </div>
                   </TableCell>
                 )}
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <Select
                     defaultValue={contact.status}
                     onValueChange={(value) =>
                       updateStatusMutation.mutate({
                         id: contact.id,
-                        status: value,
+                        status: value as ContactStatus,
                       })
                     }
                   >
@@ -202,7 +202,10 @@ export function ContactTab({ type }: ContactTabProps) {
                     </SelectContent>
                   </Select>
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell
+                  className="text-right"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <Button
                     type="button"
                     variant="ghost"
@@ -286,7 +289,7 @@ export function ContactTab({ type }: ContactTabProps) {
                   onValueChange={(value) =>
                     updateStatusMutation.mutate({
                       id: contact.id,
-                      status: value,
+                      status: value as ContactStatus,
                     })
                   }
                 >

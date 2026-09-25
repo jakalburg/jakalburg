@@ -1,29 +1,30 @@
-import { useMemo } from "react";
 import { useRouter } from "next/router";
 import SEO from "@/components/seo";
 import { SiteLayout } from "@/components/layout/SiteLayout";
 import { ProductGrid } from "@/components/product/ProductGrid";
-import { useProducts } from "@/hooks/useProducts";
+import { useProductsInfinite } from "@/hooks/useProducts";
 
 export default function SearchPage() {
   const router = useRouter();
-  const { data: products = [], isLoading } = useProducts();
   const q = typeof router.query.q === "string" ? router.query.q : "";
-  const term = q.trim().toLowerCase();
-  // Memoised so ProductGrid's infinite-scroll window only resets when the
-  // results actually change, not on every render.
-  const results = useMemo(
-    () =>
-      term
-        ? products.filter(
-            (p) =>
-              p.title.toLowerCase().includes(term) ||
-              p.category.includes(term) ||
-              p.tags.some((t) => t.includes(term)),
-          )
-        : [],
-    [products, term],
+  const term = q.trim();
+
+  // The search runs in the database and comes back a page at a time — the
+  // catalogue is never pulled down to be filtered here.
+  const {
+    products: results,
+    total,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    error,
+  } = useProductsInfinite(
+    { search: term || undefined },
+    // Nothing to search for yet — don't request the unfiltered catalogue.
+    { enabled: Boolean(term) },
   );
+
   return (
     <>
       <SEO title="Search — Jakalburg" description="Search Jakalburg." noIndex />
@@ -37,13 +38,18 @@ export default function SearchPage() {
             {term
               ? isLoading
                 ? "Searching…"
-                : `${results.length} pieces found`
+                : `${total} ${total === 1 ? "piece" : "pieces"} found`
               : "Use the search icon in the header to look up styles."}
           </p>
           <ProductGrid
-            products={results}
+            products={term ? results : []}
             isLoading={term ? isLoading : false}
             paginate
+            hasMore={Boolean(term && hasNextPage)}
+            isLoadingMore={isFetchingNextPage}
+            onLoadMore={() => void fetchNextPage()}
+            total={total}
+            error={error}
           />
         </section>
       </SiteLayout>

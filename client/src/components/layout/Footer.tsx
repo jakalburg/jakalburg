@@ -41,9 +41,8 @@ export function Footer() {
         </div>
       </div>
       <div className="border-t">
-        <div className="container-vh flex flex-col items-start justify-between gap-3 py-6 text-xs text-mute-text md:flex-row md:items-center">
+        <div className="container-vh flex flex-col items-center justify-center gap-3 py-6 text-center text-xs text-mute-text md:flex-row">
           <p>© {new Date().getFullYear()} Jakalburg. All rights reserved.</p>
-          <p>Prices in INR. Demo prototype — no real transactions.</p>
         </div>
       </div>
     </footer>

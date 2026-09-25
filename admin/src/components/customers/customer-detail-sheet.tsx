@@ -12,9 +12,13 @@ import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { format } from "date-fns";
 import { Loader2, Phone, Mail, Package, Wallet, Plus, Minus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCustomer } from "@/hooks/use-customers";
+import {
+  TablePagination,
+  TABLE_PAGE_SIZE,
+} from "@/components/admin/table-pagination";
 import { useWalletDetail } from "@/hooks/use-wallet";
 import { cn } from "@/lib/utils";
 import { WalletTransactionList } from "@/components/wallet/wallet-transaction-list";
@@ -41,9 +45,27 @@ export function CustomerDetailSheet({
   onClose,
 }: CustomerDetailSheetProps) {
   const router = useRouter();
-  const { data: customer, isLoading } = useCustomer(customerId || "");
+
+  // The embedded order history is a page, not the whole history — a customer
+  // with 200 orders used to show the newest 10 and no way to reach the rest.
+  const [orderPage, setOrderPage] = useState(1);
+  const { data: customer, isLoading } = useCustomer(customerId || "", {
+    page: orderPage,
+    limit: TABLE_PAGE_SIZE,
+  });
   const { data: wallet, isLoading: isWalletLoading } = useWalletDetail(customerId || undefined);
   const [walletAction, setWalletAction] = useState<"credit" | "debit" | null>(null);
+
+  // Opening a different customer must start their history at page 1.
+  useEffect(() => {
+    setOrderPage(1);
+  }, [customerId]);
+
+  const totalOrders = (customer as any)?.totalOrders ?? 0;
+  const orderTotalPages = Math.max(
+    1,
+    Math.ceil(totalOrders / TABLE_PAGE_SIZE),
+  );
 
   const initials =
     customer?.name
@@ -203,6 +225,14 @@ export function CustomerDetailSheet({
                     ))}
                   </div>
                 )}
+
+                <TablePagination
+                  currentPage={orderPage}
+                  totalPages={orderTotalPages}
+                  total={totalOrders}
+                  onPageChange={setOrderPage}
+                  itemLabel="orders"
+                />
               </div>
 
               <Separator />

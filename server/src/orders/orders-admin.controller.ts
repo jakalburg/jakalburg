@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Query,
 } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -32,16 +33,36 @@ import { AdminOnly } from '../auth/decorators/admin-only.decorator';
 export class OrdersAdminController {
   constructor(private readonly ordersService: OrdersService) {}
 
-  /** List every order (newest first) with the admin table's shape. */
+  /** One page of orders with the admin table's shape, filtered + sorted in SQL. */
   @Get()
-  @ApiOperation({ summary: 'Admin: list all orders' })
-  @ApiOkResponse({ description: 'Paged orders envelope: {items,total,skip,take,hasMore}.' })
+  @ApiOperation({
+    summary: 'Admin: list orders (paginated)',
+    description:
+      'Defaults to page 1 × 10 orders; `limit` is capped at 100. `search` ' +
+      'matches order number, customer email and customer name.',
+  })
+  @ApiOkResponse({
+    description:
+      'Paged orders envelope: {data,items,total,skip,take,page,limit,totalPages,hasMore,…}.',
+  })
   findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('skip') skip?: string,
+    @Query('take') take?: string,
     @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('sort') sort?: string,
   ) {
-    return this.ordersService.adminFindAll({ page, limit, status });
+    return this.ordersService.adminFindAll({
+      page,
+      limit,
+      skip,
+      take,
+      status,
+      search,
+      sort,
+    });
   }
 
   /** One order with the fuller detail shape. */
@@ -93,10 +114,23 @@ export class OrdersAdminController {
     return this.ordersService.adminShip(id, body);
   }
 
-  /** Permanently delete an order. */
+  /** (Re-)send one order to the Google Sheet — the detail page's "Add to Sheet"
+   *  button. Resolves with `{success, skipped, message}` either way; a Sheets
+   *  failure is a message on the page, not a 500. */
+  @Post(':id/sync-sheet')
+  @ApiOperation({ summary: 'Admin: sync an order to Google Sheets' })
+  syncSheet(@Param('id') id: string) {
+    return this.ordersService.adminSyncSheet(id);
+  }
+
+  /** Permanently delete an order. `removeFromSheet=false` keeps the row in the
+   *  Google Sheet as a paper trail; by default the row goes too. */
   @Delete(':id')
   @ApiOperation({ summary: 'Admin: delete an order' })
-  remove(@Param('id') id: string) {
-    return this.ordersService.adminRemove(id);
+  remove(
+    @Param('id') id: string,
+    @Query('removeFromSheet') removeFromSheet?: string,
+  ) {
+    return this.ordersService.adminRemove(id, removeFromSheet !== 'false');
   }
 }

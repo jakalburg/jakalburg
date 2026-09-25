@@ -3,11 +3,12 @@ import { collectionsService } from "@/services/collections.service";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import useAxiosAuth from "./use-axios-auth";
+import type { PaginationParams } from "@/types/pagination";
 
-export function useCollections() {
+export function useCollections(params?: PaginationParams) {
   const axiosAuth = useAxiosAuth();
-  return useAdminQuery(["collections"], () =>
-    collectionsService(axiosAuth).getAll(),
+  return useAdminQuery(["collections", JSON.stringify(params ?? {})], () =>
+    collectionsService(axiosAuth).getAll(params),
   );
 }
 

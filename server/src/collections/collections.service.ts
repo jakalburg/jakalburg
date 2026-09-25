@@ -8,6 +8,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { UpdateCollectionDto } from './dto/update-collection.dto';
 import { CollectionResponseDto } from './dto/collection-response.dto';
+import {
+  PaginatedResult,
+  PaginationQuery,
+  paginate,
+  parsePagination,
+} from '../common/pagination';
+
+/** Default page size for the storefront nav, which lists every collection.
+ *  Still bounded — `parsePagination` caps any explicit `limit` at 100. */
+const NAV_PAGE_SIZE = 100;
 
 /**
  * The 6 collections the storefront shipped with as hardcoded data
@@ -96,12 +106,30 @@ const SEED_COLLECTIONS: Array<
 export class CollectionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** All collections, ordered — each with a live product count. */
-  async findAll(): Promise<CollectionResponseDto[]> {
-    const collections = await this.prisma.collection.findMany({
-      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
-    });
-    return Promise.all(collections.map((c) => this.withCount(c)));
+  /**
+   * One page of collections, ordered, each with a live product count.
+   *
+   * The storefront nav renders every collection at once, so it passes no
+   * pagination and gets the bounded `NAV_PAGE_SIZE` default; the admin table
+   * passes page/limit and gets 10 at a time. Either way the query is capped —
+   * `withCount` runs one count per row, and that fan-out has to stay small.
+   */
+  async findAll(
+    query: PaginationQuery = {},
+  ): Promise<PaginatedResult<CollectionResponseDto>> {
+    const params = parsePagination(query, NAV_PAGE_SIZE);
+
+    const [total, collections] = await this.prisma.$transaction([
+      this.prisma.collection.count(),
+      this.prisma.collection.findMany({
+        orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+        skip: params.skip,
+        take: params.take,
+      }),
+    ]);
+
+    const data = await Promise.all(collections.map((c) => this.withCount(c)));
+    return paginate(data, total, params);
   }
 
   async findById(id: string): Promise<CollectionResponseDto> {

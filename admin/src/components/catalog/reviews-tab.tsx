@@ -1,14 +1,24 @@
 "use client";
 
-import { CheckCircle2, Trash2, Star } from "lucide-react";
+import { CheckCircle2, Search, Trash2, Star, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/admin/data-table";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { reviewService, type Review } from "@/services/review.service";
+import {
+  reviewService,
+  type Review,
+  type ReviewStatus,
+} from "@/services/review.service";
 import useAxiosAuth from "@/hooks/use-axios-auth";
+import { useDebounce } from "@/hooks/use-debounce";
+import { Input } from "@/components/ui/input";
+import {
+  TablePagination,
+  TABLE_PAGE_SIZE,
+} from "@/components/admin/table-pagination";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -30,26 +40,85 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+// Tabs across the top of the list. "Pending" leads because it is the only one
+// that needs action — everything else is a record.
+const FILTERS: { label: string; value: ReviewStatus | "all" }[] = [
+  { label: "Pending", value: "pending" },
+  { label: "Approved", value: "approved" },
+  { label: "Rejected", value: "rejected" },
+  { label: "All", value: "all" },
+];
+
+const STATUS_BADGE: Record<
+  ReviewStatus,
+  { label: string; variant: "default" | "secondary" | "destructive" }
+> = {
+  approved: { label: "Approved", variant: "default" },
+  pending: { label: "Pending", variant: "secondary" },
+  rejected: { label: "Rejected", variant: "destructive" },
+};
+
+function ReviewStatusBadge({
+  status,
+  className,
+}: {
+  status: ReviewStatus;
+  className?: string;
+}) {
+  const badge = STATUS_BADGE[status] ?? STATUS_BADGE.pending;
+  return (
+    <Badge className={className} variant={badge.variant}>
+      {badge.label}
+    </Badge>
+  );
+}
+
 export function ReviewsTab() {
+  const [filter, setFilter] = useState<ReviewStatus | "all">("pending");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [approvingId, setApprovingId] = useState<string | null>(null);
+  // The id currently being approved/rejected, so only that row's buttons show
+  // a busy state rather than the whole table locking up.
+  const [movingId, setMovingId] = useState<string | null>(null);
   const [selectedReview, setSelectedReview] = useState<Review | null>(null);
   const api = useAxiosAuth();
   const queryClient = useQueryClient();
 
-  const {
-    data: reviews = [],
-    isLoading,
-    error,
-  } = useQuery({
-    queryKey: ["reviews"],
-    queryFn: () => reviewService(api).getAll(),
+  const debouncedSearch = useDebounce(search, 300);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["reviews", filter, debouncedSearch, page],
+    queryFn: () =>
+      reviewService(api).getAll({
+        status: filter === "all" ? undefined : filter,
+        search: debouncedSearch.trim() || undefined,
+        page,
+        limit: TABLE_PAGE_SIZE,
+      }),
+    // Keep the previous page on screen while the next one loads, so paging
+    // doesn't flash the table's skeleton on every click.
+    placeholderData: (previous) => previous,
   });
+
+  const reviews = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
+
+  // A changed status filter or search term invalidates the current page.
+  useEffect(() => {
+    setPage(1);
+  }, [filter, debouncedSearch]);
+
+  // Invalidate the whole "reviews" tree, not just the active filter — a review
+  // that moves from pending to approved changes two lists at once.
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ["reviews"] });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => reviewService(api).delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["reviews"] });
+      invalidate();
       toast.success("Review deleted successfully");
     },
     onError: () => {
@@ -57,15 +126,19 @@ export function ReviewsTab() {
     },
   });
 
-  const approveMutation = useMutation({
-    mutationFn: (id: string) =>
-      reviewService(api).update(id, { status: "active" }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["reviews"] });
-      toast.success("Review approved successfully");
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: ReviewStatus }) =>
+      reviewService(api).setStatus(id, status),
+    onSuccess: (_data, variables) => {
+      invalidate();
+      toast.success(
+        variables.status === "approved"
+          ? "Review approved — it's now live on the product page"
+          : "Review rejected",
+      );
     },
     onError: () => {
-      toast.error("Failed to approve review");
+      toast.error("Failed to update the review");
     },
   });
 
@@ -78,12 +151,12 @@ export function ReviewsTab() {
     }
   };
 
-  const handleApprove = async (id: string) => {
-    setApprovingId(id);
+  const handleSetStatus = async (id: string, status: ReviewStatus) => {
+    setMovingId(id);
     try {
-      await approveMutation.mutateAsync(id);
+      await statusMutation.mutateAsync({ id, status });
     } finally {
-      setApprovingId(null);
+      setMovingId(null);
     }
   };
 
@@ -91,14 +164,20 @@ export function ReviewsTab() {
     event.stopPropagation();
   };
 
+  // The server already resolves the display name (admin override, else the
+  // linked profile), so prefer that and only fall back for older payloads.
   const getCustomerName = (review: Review) => {
     const profile = review.user?.profiles?.[0];
     return (
+      review.authorName ||
       [profile?.firstName, profile?.lastName].filter(Boolean).join(" ") ||
       review.user?.email?.split("@")[0] ||
       "Unknown User"
     );
   };
+
+  /** Reviews added from this dashboard have no order behind them. */
+  const isAdminAuthored = (review: Review) => !review.orderNumber;
 
   const formatDate = (date?: string) => {
     if (!date) return "N/A";
@@ -133,19 +212,37 @@ export function ReviewsTab() {
       ),
     },
     {
-      header: "Customer",
+      header: "Author",
       cell: (review: Review) => (
         <div className="text-sm">
           <div className="font-medium">{getCustomerName(review)}</div>
           <div className="text-xs text-muted-foreground">
-            {review.user?.email || "No email"}
+            {review.user?.email ||
+              (isAdminAuthored(review) ? "Not a customer account" : "No email")}
           </div>
         </div>
       ),
     },
     {
+      header: "Source",
+      className: "w-[140px]",
+      cell: (review: Review) =>
+        isAdminAuthored(review) ? (
+          <Badge variant="outline" title="Added from this dashboard">
+            Added by admin
+          </Badge>
+        ) : (
+          <span
+            className="font-mono text-xs text-muted-foreground"
+            title="Written by the customer off this delivered order"
+          >
+            {review.orderNumber}
+          </span>
+        ),
+    },
+    {
       header: "Rating",
-      className: "w-[120px]",
+      className: "w-[110px]",
       cell: (review: Review) => (
         <div className="flex items-center text-amber-500">
           <Star className="w-4 h-4 fill-current" />
@@ -158,11 +255,7 @@ export function ReviewsTab() {
     {
       header: "Status",
       className: "w-[110px]",
-      cell: (review: Review) => (
-        <Badge variant={review.status === "active" ? "default" : "secondary"}>
-          {review.status === "active" ? "Approved" : "Pending"}
-        </Badge>
-      ),
+      cell: (review: Review) => <ReviewStatusBadge status={review.status} />,
     },
     {
       header: "Comment",
@@ -179,83 +272,133 @@ export function ReviewsTab() {
     },
     {
       header: "Actions",
-      className: "w-[170px]",
-      cell: (review: Review) => (
-        <div className="flex items-center gap-2">
-          {review.status !== "active" && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={approvingId === review.id}
-              onClick={(event) => {
-                stopActionClick(event);
-                handleApprove(review.id);
-              }}
-            >
-              {approvingId === review.id ? (
-                "Approving..."
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  Approve
-                </>
-              )}
-            </Button>
-          )}
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
+      className: "w-[210px]",
+      cell: (review: Review) => {
+        const busy = movingId === review.id;
+        return (
+          <div className="flex items-center gap-1">
+            {review.status !== "approved" && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={(event) => {
+                  stopActionClick(event);
+                  handleSetStatus(review.id, "approved");
+                }}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Approve
+              </Button>
+            )}
+            {review.status !== "rejected" && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-destructive hover:text-destructive"
-                disabled={deletingId === review.id}
-                onClick={stopActionClick}
+                disabled={busy}
+                onClick={(event) => {
+                  stopActionClick(event);
+                  handleSetStatus(review.id, "rejected");
+                }}
               >
-                {deletingId === review.id ? (
-                  "Deleting..."
-                ) : (
-                  <Trash2 className="w-4 h-4" />
-                )}
+                <XCircle className="w-4 h-4" />
+                Reject
               </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent onClick={stopActionClick}>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete this review?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This action cannot be undone. This will permanently remove the
-                  review and recalculate the product&apos;s average rating.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => handleDelete(review.id)}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            )}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  disabled={deletingId === review.id}
+                  onClick={stopActionClick}
                 >
-                  Delete
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-      ),
+                  {deletingId === review.id ? (
+                    "Deleting..."
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent onClick={stopActionClick}>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete this review?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This action cannot be undone. This will permanently remove the
+                    review and recalculate the product&apos;s average rating. To
+                    keep a record instead, reject it.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => handleDelete(review.id)}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        );
+      },
     },
   ];
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-2">
+        {FILTERS.map((f) => (
+          <Button
+            key={f.value}
+            variant={filter === f.value ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFilter(f.value)}
+          >
+            {f.label}
+          </Button>
+        ))}
+        <div className="relative ml-auto w-full sm:w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search reviews, authors, products…"
+            className="pl-9"
+          />
+        </div>
+      </div>
+
       <div className="border rounded-lg overflow-x-auto">
         <DataTable
-          title="All Customer Reviews"
+          title="Customer Reviews"
           data={reviews}
           columns={columns}
           isLoading={isLoading}
           error={error}
-          emptyMessage="No reviews have been submitted yet."
+          emptyMessage={
+            debouncedSearch.trim()
+              ? `No reviews match "${debouncedSearch.trim()}".`
+              : filter === "pending"
+                ? "Nothing waiting for approval."
+                : "No reviews in this state."
+          }
           getRowKey={(review) => review.id}
           onRowClick={setSelectedReview}
         />
       </div>
+
+      {!isLoading && !error && (
+        <TablePagination
+          currentPage={page}
+          totalPages={totalPages}
+          total={total}
+          onPageChange={setPage}
+          itemLabel="reviews"
+        />
+      )}
 
       <Dialog
         open={Boolean(selectedReview)}
@@ -286,22 +429,14 @@ export function ReviewsTab() {
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
                     Status
                   </p>
-                  <Badge
+                  <ReviewStatusBadge
                     className="mt-2"
-                    variant={
-                      selectedReview.status === "active"
-                        ? "default"
-                        : "secondary"
-                    }
-                  >
-                    {selectedReview.status === "active"
-                      ? "Approved"
-                      : "Pending"}
-                  </Badge>
+                    status={selectedReview.status}
+                  />
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Customer
+                    Author
                   </p>
                   <p className="mt-2 text-sm font-medium">
                     {getCustomerName(selectedReview)}
@@ -312,7 +447,10 @@ export function ReviewsTab() {
                     Email
                   </p>
                   <p className="mt-2 break-all text-sm font-medium">
-                    {selectedReview.user?.email || "No email"}
+                    {selectedReview.user?.email ||
+                      (isAdminAuthored(selectedReview)
+                        ? "Not a customer account"
+                        : "No email")}
                   </p>
                 </div>
                 <div>
@@ -325,6 +463,20 @@ export function ReviewsTab() {
                       {selectedReview.rating} / 5
                     </span>
                   </div>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Source
+                  </p>
+                  <p className="mt-2 text-sm font-medium">
+                    {isAdminAuthored(selectedReview) ? (
+                      "Added by admin"
+                    ) : (
+                      <span className="font-mono">
+                        {selectedReview.orderNumber}
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -347,7 +499,20 @@ export function ReviewsTab() {
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:justify-between">
+            {selectedReview && selectedReview.status !== "approved" ? (
+              <Button
+                onClick={() => {
+                  handleSetStatus(selectedReview.id, "approved");
+                  setSelectedReview(null);
+                }}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Approve
+              </Button>
+            ) : (
+              <span />
+            )}
             <DialogClose asChild>
               <Button variant="outline">Close</Button>
             </DialogClose>

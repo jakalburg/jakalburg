@@ -9,12 +9,26 @@ import { useHydrated } from "@/hooks/useHydrated";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { cn } from "@/lib/utils";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
+import { RatingSummary } from "@/components/reviews/StarRating";
 
 export function ProductCard({ product }: { product: Product }) {
   const hydrated = useHydrated();
   const dispatch = useAppDispatch();
   const requireAuth = useRequireAuth();
   const inWishlist = useAppSelector(selectWishlistIds).includes(product.id);
+
+  // Price summary across the selectable colours. Each colour's effective price
+  // is its own override or the product default; when they differ we show a
+  // "from ₹X" range. The strike-through only appears when the compare-at is the
+  // same across every colour (otherwise it'd be ambiguous on a listing card).
+  const selectable = product.colors.length ? product.colors : [null];
+  const prices = selectable.map((c) => c?.price ?? product.price);
+  const minPrice = Math.min(...prices);
+  const priceVaries = minPrice !== Math.max(...prices);
+  const compareAts = selectable.map((c) => c?.compareAtPrice ?? product.compareAtPrice);
+  const uniformCompareAt = compareAts.every((x) => x === compareAts[0])
+    ? compareAts[0]
+    : undefined;
 
   return (
     <div className="group">
@@ -61,14 +75,29 @@ export function ProductCard({ product }: { product: Product }) {
           <p className="mt-0.5 text-xs text-mute-text capitalize">
             {product.category.replace("-", " ")}
           </p>
+          {/* Silent until the product has at least one approved review, and
+              hidden entirely when an admin has switched reviews off. */}
+          {!product.reviewsHidden && (
+            <RatingSummary
+              average={product.avgRating}
+              count={product.reviewCount}
+              className="mt-1"
+            />
+          )}
           <div className="mt-1 flex items-baseline gap-2 text-sm">
-            <span className={cn(product.compareAtPrice && "text-destructive")}>
-              {formatINR(product.price)}
-            </span>
-            {product.compareAtPrice && (
-              <span className="text-xs text-mute-text line-through">
-                {formatINR(product.compareAtPrice)}
-              </span>
+            {priceVaries ? (
+              <span>from {formatINR(minPrice)}</span>
+            ) : (
+              <>
+                <span className={cn(uniformCompareAt && "text-destructive")}>
+                  {formatINR(minPrice)}
+                </span>
+                {uniformCompareAt && uniformCompareAt > minPrice && (
+                  <span className="text-xs text-mute-text line-through">
+                    {formatINR(uniformCompareAt)}
+                  </span>
+                )}
+              </>
             )}
           </div>
         </div>

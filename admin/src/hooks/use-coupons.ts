@@ -3,10 +3,13 @@ import { couponsService } from "@/services/coupons.service";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import useAxiosAuth from "./use-axios-auth";
+import type { PaginationParams } from "@/types/pagination";
 
-export function useCoupons() {
+export function useCoupons(params?: PaginationParams) {
   const axiosAuth = useAxiosAuth();
-  return useAdminQuery(["coupons"], () => couponsService(axiosAuth).getAll());
+  return useAdminQuery(["coupons", JSON.stringify(params ?? {})], () =>
+    couponsService(axiosAuth).getAll(params),
+  );
 }
 
 export function useCoupon(id: string) {

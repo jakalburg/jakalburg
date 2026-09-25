@@ -80,6 +80,16 @@ class Environment {
     return process.env.ADMIN_PASSWORD || 'admin@123';
   }
 
+  // ── Owner notifications ───────────────────────────────────────────────
+  // Recipient for the new-order owner notification. Defaults to ADMIN_EMAIL
+  // but kept separate on purpose: ADMIN_EMAIL doubles as the admin *login*
+  // identity (a branded admin@jakalburgcreation.com whose domain has no MX
+  // record, so mail to it bounces). OWNER_EMAIL lets order alerts go to a
+  // real, deliverable inbox without changing what the admin logs in with.
+  get OWNER_EMAIL(): string {
+    return process.env.OWNER_EMAIL || this.ADMIN_EMAIL;
+  }
+
   // ── Google OAuth ──────────────────────────────────────────────────────
   // Jakalburg uses GOOGLE_CLIENT_ID/SECRET; accept kaybykhushie's
   // OAUTH_CLIENT_ID/SECRET as a fallback so either convention works.
@@ -187,6 +197,35 @@ class Environment {
   get UPLOAD_IMAGE_MAX_SIZE(): number {
     const v = process.env.UPLOAD_IMAGE_MAX_SIZE;
     return v ? parseInt(v, 10) : 5;
+  }
+
+  // ── Google Sheets order sync ──────────────────────────────────────────
+  // The deployed Apps Script Web App (google_sheets_appscript.gs) that mirrors
+  // orders into the owner's spreadsheet. Optional: with either value missing
+  // the sync is simply skipped — checkout, emails, and the admin all behave
+  // exactly as before.
+  get GOOGLE_SHEETS_WEBHOOK_URL(): string {
+    return process.env.GOOGLE_SHEETS_WEBHOOK_URL || '';
+  }
+
+  // Must match the WEBHOOK_SECRET Script Property on the Apps Script project,
+  // byte for byte — a mismatch makes the script reject every post as
+  // "Unauthorized request."
+  get GOOGLE_SHEETS_WEBHOOK_SECRET(): string {
+    return process.env.GOOGLE_SHEETS_WEBHOOK_SECRET || '';
+  }
+
+  // Informational only — the script opens the sheet via its own SPREADSHEET_ID
+  // Script Property. Kept so the admin can deep-link to the spreadsheet.
+  get GOOGLE_SHEETS_SPREADSHEET_ID(): string {
+    return process.env.GOOGLE_SHEETS_SPREADSHEET_ID || '';
+  }
+
+  /** True only when both the Web App URL and the shared secret are present. */
+  get isGoogleSheetsConfigured(): boolean {
+    return Boolean(
+      this.GOOGLE_SHEETS_WEBHOOK_URL && this.GOOGLE_SHEETS_WEBHOOK_SECRET,
+    );
   }
 }
 

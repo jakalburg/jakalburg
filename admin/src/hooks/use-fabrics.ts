@@ -7,6 +7,7 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import useAxiosAuth from "./use-axios-auth";
+import type { PaginationParams } from "@/types/pagination";
 
 /** Pull the server's friendly message out of an axios error, if present. */
 function errMessage(error: any): string {
@@ -17,9 +18,11 @@ function errMessage(error: any): string {
   );
 }
 
-export function useFabrics() {
+export function useFabrics(params?: PaginationParams) {
   const axiosAuth = useAxiosAuth();
-  return useAdminQuery(["fabrics"], () => fabricsService(axiosAuth).getAll());
+  return useAdminQuery(["fabrics", JSON.stringify(params ?? {})], () =>
+    fabricsService(axiosAuth).getAll(params),
+  );
 }
 
 export function useCreateFabric() {

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Plus, Trash2, Calendar, Tag as TagIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/admin/data-table";
@@ -18,11 +19,23 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  TablePagination,
+  TABLE_PAGE_SIZE,
+} from "@/components/admin/table-pagination";
 
 export default function CouponsPage() {
+  const router = useRouter();
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const { data: coupons = [], isLoading, error } = useCoupons();
+  const [page, setPage] = useState(1);
+  const { data, isLoading, error } = useCoupons({
+    page,
+    limit: TABLE_PAGE_SIZE,
+  });
+  const coupons = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
   const deleteMutation = useDeleteCoupon();
 
   const handleDelete = async (id: string) => {
@@ -110,7 +123,12 @@ export default function CouponsPage() {
       header: "Actions",
       className: "w-[150px]",
       cell: (coupon: any) => (
-        <div className="flex items-center gap-2">
+        // Stop row-click navigation from firing when an action control (Edit
+        // link / Delete button / its confirm dialog) is clicked.
+        <div
+          className="flex items-center gap-2"
+          onClick={(e) => e.stopPropagation()}
+        >
           <Button variant="ghost" size="sm" asChild>
             <Link href={`/coupons/${coupon.id}/edit`}>Edit</Link>
           </Button>
@@ -180,7 +198,18 @@ export default function CouponsPage() {
         error={error}
         emptyMessage="No coupons found"
         getRowKey={(coupon) => coupon.id}
+        onRowClick={(coupon) => router.push(`/coupons/${coupon.id}`)}
       />
+
+      {!isLoading && !error && (
+        <TablePagination
+          currentPage={page}
+          totalPages={totalPages}
+          total={total}
+          onPageChange={setPage}
+          itemLabel="coupons"
+        />
+      )}
     </div>
   );
 }

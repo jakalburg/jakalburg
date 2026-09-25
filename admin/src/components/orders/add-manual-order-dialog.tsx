@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Plus, X, Search, Loader2, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,9 @@ interface OrderItem {
   price: number;
 }
 
+/** Customer suggestions shown under the name field. */
+const CUSTOMER_SUGGESTIONS = 6;
+
 interface AddManualOrderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -92,17 +95,25 @@ export function AddManualOrderDialog({ open, onOpenChange }: AddManualOrderDialo
   const [isSearching, setIsSearching] = useState(false);
   const debouncedSearch = useDebounce(productSearch, 300);
 
-  // Customer search/autocomplete
-  const { data: allCustomers = [] } = useAdminQuery(["customers"], () =>
-    customersService(api).getAll()
-  );
+  // Customer autocomplete. The query runs server-side and is debounced, so
+  // typing a name doesn't pull the customer list down or fire per keystroke.
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
-  const filteredCustomers = customerName.length >= 2
-    ? allCustomers.filter((c: any) =>
-        c.name?.toLowerCase().includes(customerName.toLowerCase()) ||
-        c.email?.toLowerCase().includes(customerName.toLowerCase()) ||
-        c.phone?.includes(customerName)
-      ).slice(0, 6)
+  const debouncedCustomerName = useDebounce(customerName, 300);
+  const customerQuery = debouncedCustomerName.trim();
+  const { data: customerPage } = useAdminQuery(
+    ["customers", "order-autocomplete", customerQuery],
+    () =>
+      customersService(api).getAll({
+        search: customerQuery,
+        page: 1,
+        limit: CUSTOMER_SUGGESTIONS,
+      }),
+    // Two characters before the first request — matches the old behaviour and
+    // keeps a single letter from matching most of the store.
+    { enabled: open && customerQuery.length >= 2 },
+  );
+  const filteredCustomers = customerQuery.length >= 2
+    ? (customerPage?.data ?? [])
     : [];
 
   const selectCustomer = (customer: any) => {
@@ -130,11 +141,14 @@ export function AddManualOrderDialog({ open, onOpenChange }: AddManualOrderDialo
     }
   };
 
-  // Trigger search on debounced value
-  useState(() => {
+  // Run the search when the DEBOUNCED term settles. This was a `useState`
+  // initialiser, which only ever ran on mount — so the debounce did nothing and
+  // the real request came straight off the input's onChange, one per keystroke.
+  useEffect(() => {
     if (debouncedSearch) handleSearchProducts(debouncedSearch);
     else setSearchResults([]);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch]);
 
   const addProductItem = (product: any) => {
     const existing = items.find((i) => i.productId === product.id);
@@ -343,10 +357,7 @@ export function AddManualOrderDialog({ open, onOpenChange }: AddManualOrderDialo
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={productSearch}
-                onChange={(e) => {
-                  setProductSearch(e.target.value);
-                  handleSearchProducts(e.target.value);
-                }}
+                onChange={(e) => setProductSearch(e.target.value)}
                 placeholder="Search products to add..."
                 className="pl-9"
               />

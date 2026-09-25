@@ -7,6 +7,12 @@ import { Fabric, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFabricDto } from './dto/create-fabric.dto';
 import { UpdateFabricDto } from './dto/update-fabric.dto';
+import {
+  PaginatedResult,
+  PaginationQuery,
+  paginate,
+  parsePagination,
+} from '../common/pagination';
 
 /**
  * FabricsService — CRUD for the curated fabric list. Mirrors the products
@@ -20,8 +26,29 @@ import { UpdateFabricDto } from './dto/update-fabric.dto';
 export class FabricsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(): Promise<Fabric[]> {
-    return this.prisma.fabric.findMany({ orderBy: { name: 'asc' } });
+  /** One page of fabrics, A–Z, optionally filtered by name. Feeds both the
+   *  admin fabrics table and the product form's fabric picker, which loads 10
+   *  at a time and appends as the admin scrolls. */
+  async findAll(
+    query: PaginationQuery & { search?: string } = {},
+  ): Promise<PaginatedResult<Fabric>> {
+    const params = parsePagination(query);
+    const where: Prisma.FabricWhereInput = {};
+
+    const term = query.search?.trim();
+    if (term) where.name = { contains: term, mode: 'insensitive' };
+
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.fabric.count({ where }),
+      this.prisma.fabric.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip: params.skip,
+        take: params.take,
+      }),
+    ]);
+
+    return paginate(data, total, params);
   }
 
   async create(dto: CreateFabricDto): Promise<Fabric> {

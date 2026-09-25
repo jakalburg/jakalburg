@@ -5,8 +5,8 @@ import { ImageShimmer } from "@/components/ui/image-shimmer";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2, Power } from "lucide-react";
-import { useProducts } from "@/hooks/use-products";
 import useAxiosAuth from "@/hooks/use-axios-auth";
+import { useInfiniteOptions } from "@/hooks/use-infinite-options";
 import { productsService } from "@/services/products.service";
 import { Product } from "@/types/product";
 import {
@@ -33,21 +33,36 @@ export function DisabledProductsDialog({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isEnabling, setIsEnabling] = useState(false);
 
-  const { data, isLoading } = useProducts({
-    page: 1,
-    limit: 200,
-    status: "disabled",
-  });
   const queryClient = useQueryClient();
   const axiosAuth = useAxiosAuth();
 
-  const products: Product[] = data?.data ?? [];
+  // Disabled products load a batch at a time and append as the list is
+  // scrolled. This used to ask for 200 in one go, which the server silently
+  // clamped to its 100-row maximum — so a store with more than 100 hidden
+  // products could never reach the rest of them from here.
+  const {
+    options: products,
+    isLoading,
+    isLoadingMore,
+    hasMore,
+    error,
+    total,
+    fetchMore,
+    sentinelRef,
+  } = useInfiniteOptions<Product>({
+    queryKey: ["products", "disabled-picker"],
+    fetchPage: ({ page, limit }) =>
+      productsService(axiosAuth).getAll({ page, limit, status: "disabled" }),
+    // Nothing is fetched until the dialog is actually opened.
+    enabled: open,
+  });
 
   // Reset selection whenever the dialog is (re)opened
   useEffect(() => {
     if (open) setSelectedIds(new Set());
   }, [open]);
 
+  // "Select all" covers the batch on screen, never the un-loaded remainder.
   const allSelected =
     products.length > 0 && products.every((p) => selectedIds.has(p.id));
 
@@ -83,7 +98,10 @@ export function DisabledProductsDialog({
       toast.success(
         `${result.updated} product${result.updated === 1 ? "" : "s"} enabled`,
       );
-      if (ids.length >= products.length) {
+      // Close only once nothing is left to enable. Comparing against the loaded
+      // batch instead of the server's `total` would shut the dialog while
+      // un-scrolled disabled products were still hiding behind it.
+      if (ids.length >= total) {
         onOpenChange(false);
       }
     } catch (error: any) {
@@ -106,9 +124,18 @@ export function DisabledProductsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {isLoading ? (
+        {isLoading && products.length === 0 ? (
           <div className="flex items-center justify-center py-10">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : error && products.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-8 text-sm">
+            <span className="text-destructive">
+              Failed to load disabled products
+            </span>
+            <Button size="sm" variant="outline" onClick={fetchMore}>
+              Retry
+            </Button>
           </div>
         ) : products.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
@@ -125,7 +152,7 @@ export function DisabledProductsDialog({
               <span className="text-sm text-muted-foreground">
                 {selectedIds.size > 0
                   ? `${selectedIds.size} selected`
-                  : `Select all (${products.length})`}
+                  : `Select all shown (${products.length} of ${total})`}
               </span>
             </div>
             <ScrollArea className="h-[320px] pr-4">
@@ -165,6 +192,29 @@ export function DisabledProductsDialog({
                     </label>
                   );
                 })}
+
+                {/* Crossing this sentinel pulls the next batch. The rows above
+                    stay mounted, so loading more never blanks the list or
+                    drops what is already ticked. */}
+                {hasMore && (
+                  <div
+                    ref={sentinelRef}
+                    className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground"
+                  >
+                    {isLoadingMore ? (
+                      <>
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Loading more…
+                      </>
+                    ) : error ? (
+                      <Button size="sm" variant="ghost" onClick={fetchMore}>
+                        Failed to load more — Retry
+                      </Button>
+                    ) : (
+                      "Scroll for more"
+                    )}
+                  </div>
+                )}
               </div>
             </ScrollArea>
           </>

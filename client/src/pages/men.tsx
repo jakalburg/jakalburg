@@ -1,10 +1,8 @@
 import SEO from "@/components/seo";
 import { SiteLayout } from "@/components/layout/SiteLayout";
 import { CollectionView } from "@/components/collection/CollectionView";
-import { useProducts } from "@/hooks/useProducts";
 
 export default function MenPage() {
-  const { data: products = [], isLoading } = useProducts();
   return (
     <>
       <SEO
@@ -17,8 +15,7 @@ export default function MenPage() {
           eyebrow="Men"
           title="The men's edit"
           description="Everything for him — considered basics through to outerwear."
-          products={products.filter((p) => p.gender === "men")}
-          isLoading={isLoading}
+          filters={{ gender: "men" }}
         />
       </SiteLayout>
     </>

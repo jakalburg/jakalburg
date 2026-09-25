@@ -1,4 +1,21 @@
 import { AxiosInstance } from "axios";
+import API_ENDPOINTS from "../config/endpoints";
+import { realApi } from "@/lib/api/real-axios";
+import { Paginated, toPaginated, type PaginationParams } from "@/types/pagination";
+
+// ---------------------------------------------------------------------------
+// Coupons service — wired to the real NestJS backend (like products/fabrics/…).
+//
+// Every call goes through `realApi`, NOT the mock axios. Call sites still pass
+// the mock instance from `useAxiosAuth()` for signature compatibility, but it is
+// ignored here on purpose.
+//
+// The server speaks a clean REST shape (`code`, `isActive`, `endDate` as ISO,
+// no `productType`). The admin UI (list / create / edit forms) was built around
+// `couponCode`, `status: "active" | "inactive"` and an optional `productType`,
+// so this seam maps between the two in BOTH directions — reads via
+// `toAdminCoupon`, writes via `toServerPayload`.
+// ---------------------------------------------------------------------------
 
 export interface Coupon {
   id: string;
@@ -17,46 +34,168 @@ export interface Coupon {
   updatedAt?: string;
 }
 
-export const couponsService = (api: AxiosInstance) => ({
-  // Get all coupons
-  async getAll(): Promise<Coupon[]> {
-    const response = await api.get("/coupon");
-    return response.data;
+/** The customer who placed an order that redeemed a coupon. */
+export interface CouponUsageUser {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/** One order that redeemed a coupon (reconstructed from Order.couponCode). */
+export interface CouponUsageRow {
+  orderId: string;
+  orderNumber: string;
+  createdAt: string;
+  total: number;
+  discount: number;
+  /** null for a guest order with no linked user. */
+  user: CouponUsageUser | null;
+}
+
+/** A coupon plus every order that has redeemed it (newest first). */
+export interface CouponUsage {
+  coupon: Coupon;
+  usage: CouponUsageRow[];
+}
+
+/** The coupon shape the server returns. */
+interface ServerCoupon {
+  id: string;
+  code: string;
+  title?: string | null;
+  discountType: "percentage" | "fixed";
+  discountAmount: number;
+  minimumAmount: number;
+  productType?: string | null;
+  endDate?: string | null;
+  isActive: boolean;
+  maxUsage?: number | null;
+  usageCount: number;
+  logo?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Server coupon → the `Coupon` shape the admin table / forms read. */
+function toAdminCoupon(c: ServerCoupon): Coupon {
+  return {
+    id: c.id,
+    couponCode: c.code,
+    title: c.title ?? "",
+    discountType: c.discountType,
+    discountAmount: c.discountAmount,
+    minimumAmount: c.minimumAmount,
+    endDate: c.endDate ?? "",
+    status: c.isActive ? "active" : "inactive",
+    logo: c.logo ?? undefined,
+    maxUsage: c.maxUsage ?? undefined,
+    usageCount: c.usageCount,
+    // Informational label stored on the coupon (not enforced at checkout).
+    productType: c.productType ?? "all",
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+  };
+}
+
+/** Admin form values → the server's create/update payload. Only defined fields
+ *  are sent, so a partial edit patches just those columns. `productType` is an
+ *  informational label (persisted, but not enforced at checkout). */
+function toServerPayload(data: Partial<Coupon>): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  if (data.couponCode !== undefined) payload.code = data.couponCode;
+  if (data.title !== undefined) payload.title = data.title;
+  if (data.discountType !== undefined) payload.discountType = data.discountType;
+  if (data.discountAmount !== undefined)
+    payload.discountAmount = Number(data.discountAmount);
+  if (data.minimumAmount !== undefined)
+    payload.minimumAmount = Number(data.minimumAmount);
+  if (data.productType !== undefined) payload.productType = data.productType;
+  if (data.endDate !== undefined)
+    payload.endDate = data.endDate
+      ? new Date(data.endDate).toISOString()
+      : undefined;
+  if (data.status !== undefined) payload.isActive = data.status === "active";
+  if (data.maxUsage !== undefined)
+    payload.maxUsage =
+      data.maxUsage === undefined || (data.maxUsage as unknown) === ""
+        ? undefined
+        : Number(data.maxUsage);
+  if (data.logo !== undefined) payload.logo = data.logo || undefined;
+  return payload;
+}
+
+/**
+ * @param _api mock axios from `useAxiosAuth()` — accepted for call-site
+ *   compatibility but intentionally unused; coupons use `realApi`.
+ */
+export const couponsService = (_api: AxiosInstance) => ({
+  // One page of coupons. Search runs server-side.
+  async getAll(params?: PaginationParams): Promise<Paginated<Coupon>> {
+    const response = await realApi.get(API_ENDPOINTS.coupons.getAll, {
+      params,
+    });
+    const page = toPaginated<ServerCoupon>(response.data);
+    return { ...page, data: page.data.map(toAdminCoupon) };
   },
 
-  // Get active coupons
+  // Active, non-expired coupons — derived from the first page (no dedicated
+  // server route). Kept for call-site compatibility.
   async getActive(): Promise<Coupon[]> {
-    const response = await api.get("/coupon/active");
-    return response.data;
+    const { data: all } = await this.getAll({ limit: 100 });
+    const now = Date.now();
+    return all.filter(
+      (c) =>
+        c.status === "active" &&
+        (!c.endDate || new Date(c.endDate).getTime() >= now),
+    );
   },
 
-  // Get single coupon
   async getById(id: string): Promise<Coupon> {
-    const response = await api.get(`/coupon/${id}`);
-    return response.data;
+    const response = await realApi.get<ServerCoupon>(
+      API_ENDPOINTS.coupons.getById(id),
+    );
+    return toAdminCoupon(response.data);
   },
 
-  // Create coupon
+  // The coupon + every order that redeemed it (server reconstructs usage from
+  // Order.couponCode). Coupon is mapped to the admin shape; rows pass through.
+  async getUsage(id: string): Promise<CouponUsage> {
+    const response = await realApi.get<{
+      coupon: ServerCoupon;
+      usage: CouponUsageRow[];
+    }>(API_ENDPOINTS.coupons.usage(id));
+    return {
+      coupon: toAdminCoupon(response.data.coupon),
+      usage: response.data.usage,
+    };
+  },
+
   async create(data: Partial<Coupon>): Promise<Coupon> {
-    const response = await api.post("/coupon", data);
-    return response.data;
+    const response = await realApi.post<ServerCoupon>(
+      API_ENDPOINTS.coupons.create,
+      toServerPayload(data),
+    );
+    return toAdminCoupon(response.data);
   },
 
-  // Update coupon
   async update(id: string, data: Partial<Coupon>): Promise<Coupon> {
-    const response = await api.patch(`/coupon/${id}`, data);
-    return response.data;
+    const response = await realApi.patch<ServerCoupon>(
+      API_ENDPOINTS.coupons.update(id),
+      toServerPayload(data),
+    );
+    return toAdminCoupon(response.data);
   },
 
-  // Delete coupon (soft delete - sets status to inactive)
+  // Hard delete on the server (there is no soft-delete column).
   async delete(id: string): Promise<void> {
-    await api.delete(`/coupon/${id}`);
+    await realApi.delete(API_ENDPOINTS.coupons.delete(id));
   },
 
-  // Validate coupon
+  // Validate a code against a subtotal (server prices the discount). The admin
+  // doesn't call this today, but the storefront checkout does via its own client.
   async validate(data: {
     couponCode: string;
-    cartItems: any[];
+    cartItems?: unknown[];
     subtotal: number;
   }): Promise<{
     valid: boolean;
@@ -65,7 +204,10 @@ export const couponsService = (api: AxiosInstance) => ({
     couponCode?: string;
     discountType?: string;
   }> {
-    const response = await api.post("/coupon/validate", data);
+    const response = await realApi.post(API_ENDPOINTS.coupons.validate, {
+      code: data.couponCode,
+      subtotal: data.subtotal,
+    });
     return response.data;
   },
 });

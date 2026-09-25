@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PaginatedResponseDto } from '../../common/pagination';
 
 export class CollectionResponseDto {
   @ApiProperty()
@@ -33,4 +34,10 @@ export class CollectionResponseDto {
 
   @ApiProperty()
   updatedAt: Date;
+}
+
+/** Paginated collection list envelope. */
+export class CollectionListResponseDto extends PaginatedResponseDto<CollectionResponseDto> {
+  @ApiProperty({ type: [CollectionResponseDto] })
+  declare data: CollectionResponseDto[];
 }

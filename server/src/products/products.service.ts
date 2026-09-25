@@ -7,17 +7,29 @@ import {
   AdminProductResponseDto,
   ProductResponseDto,
 } from './dto/product-response.dto';
-import { CreateProductDto } from './dto/create-product.dto';
+import { CreateProductDto, ProductColorDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import {
+  PaginatedResult,
+  PaginationQuery,
+  paginate,
+  parsePagination,
+} from '../common/pagination';
 
-/** Params the admin catalogue list/search accept. */
-export interface AdminListParams {
-  skip?: number;
-  take?: number;
+/** Params the admin catalogue list/search accept. Pagination fields take raw
+ *  query strings too — `parsePagination` normalises and clamps them. */
+export interface AdminListParams extends PaginationQuery {
   status?: string; // 'active' | 'disabled'/'inactive' | 'all'
   search?: string;
   category?: string;
   sort?: string;
+}
+
+/** Distinct filter values for a slice of the catalogue, so the storefront can
+ *  render complete size/colour chips without holding every product in memory. */
+export interface ProductFacetsDto {
+  sizes: string[];
+  colors: string[];
 }
 
 type ProductWithColors = Product & { colors: ProductColor[] };
@@ -31,35 +43,133 @@ const INCLUDE_COLORS = {
 export class ProductsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** List products with optional filters + sort. Returns the full catalogue
-   *  when no filters are given (the storefront fetches all and facets on the
-   *  client, matching its original static-data behaviour). */
-  async findAll(query: ProductQueryDto): Promise<ProductResponseDto[]> {
+  /**
+   * Storefront product list — filtered, sorted and paginated in the database.
+   * Returns one page (default 10) inside the standard envelope; the shopper
+   * pulls further pages as they scroll rather than downloading the catalogue.
+   */
+  async findAll(
+    query: ProductQueryDto,
+  ): Promise<PaginatedResult<ProductResponseDto>> {
+    const where = this.buildStorefrontWhere(query);
+    const params = parsePagination(query);
+
+    const [total, products] = await this.prisma.$transaction([
+      this.prisma.product.count({ where }),
+      this.prisma.product.findMany({
+        where,
+        orderBy: this.resolveSort(query.sort),
+        include: INCLUDE_COLORS,
+        skip: params.skip,
+        take: params.take,
+      }),
+    ]);
+
+    return paginate(
+      products.map((p) => this.toResponse(p)),
+      total,
+      params,
+    );
+  }
+
+  /**
+   * Distinct sizes + colour names across everything matching the given filters
+   * (ignoring size/colour themselves, so picking one doesn't erase the others).
+   *
+   * This exists because the collection pages render their filter chips from the
+   * whole matching set, which pagination no longer keeps in memory.
+   *
+   * COST: filtering happens in SQL, but the de-duplication does not — this
+   * reads two narrow columns for every matching row. That is cheap at this
+   * catalogue's size and the storefront caches the result for 5 minutes. If the
+   * catalogue reaches the tens of thousands, push the distinct into Postgres
+   * (`unnest(sizes) WITH ORDINALITY` + `DISTINCT`), which means expressing the
+   * filter in raw SQL as well.
+   */
+  async listFacets(query: ProductQueryDto): Promise<ProductFacetsDto> {
+    const where = this.buildStorefrontWhere({
+      ...query,
+      size: undefined,
+      color: undefined,
+    });
+
+    const [rows, colors] = await this.prisma.$transaction([
+      this.prisma.product.findMany({ where, select: { sizes: true } }),
+      this.prisma.productColor.findMany({
+        where: { product: where },
+        select: { name: true },
+        distinct: ['name'],
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+
+    // Sizes live in a String[] column, so "distinct" has to happen here. Order
+    // is preserved from the catalogue (XS, S, M, …) rather than alphabetised,
+    // which would read as "L, M, S, XL".
+    const sizes: string[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      for (const size of row.sizes) {
+        if (!seen.has(size)) {
+          seen.add(size);
+          sizes.push(size);
+        }
+      }
+    }
+
+    return { sizes, colors: colors.map((c) => c.name) };
+  }
+
+  /** Shared filter for every storefront read — visible products only. */
+  private buildStorefrontWhere(query: ProductQueryDto): Prisma.ProductWhereInput {
     // Only storefront-visible products (admin can hide via isActive).
     const where: Prisma.ProductWhereInput = { isActive: true };
 
+    // Collection membership and free-text search are each an OR of several
+    // conditions, and both may be active at once — so they go into AND as
+    // separate groups rather than both writing `where.OR` (where the second
+    // would silently overwrite the first and widen the result set).
+    const and: Prisma.ProductWhereInput[] = [];
+
     if (query.gender) where.gender = query.gender;
     if (query.category) where.category = query.category;
-    if (query.collection) where.collections = { has: query.collection };
     if (query.isNew !== undefined) where.isNew = query.isNew;
     if (query.onSale !== undefined) where.onSale = query.onSale;
     if (query.essential !== undefined) where.essential = query.essential;
-    if (query.search) {
-      const term = query.search.trim();
-      where.OR = [
-        { title: { contains: term, mode: 'insensitive' } },
-        { description: { contains: term, mode: 'insensitive' } },
-        { tags: { has: term.toLowerCase() } },
-      ];
+    if (query.size) where.sizes = { has: query.size };
+    if (query.color) where.colors = { some: { name: query.color } };
+    if (query.ids?.length) where.id = { in: query.ids };
+
+    if (query.collection) {
+      const slug = query.collection;
+      and.push({
+        OR: [
+          // Current model: membership is a list of collection slugs.
+          { collections: { has: slug } },
+          // Legacy single-collection column, still set on older rows.
+          { collection: slug },
+          // "Essentials" is a flag rather than a collection row.
+          ...(slug === 'essentials'
+            ? [{ essential: true } as Prisma.ProductWhereInput]
+            : []),
+        ],
+      });
     }
 
-    const products = await this.prisma.product.findMany({
-      where,
-      orderBy: this.resolveSort(query.sort),
-      include: INCLUDE_COLORS,
-    });
+    if (query.search) {
+      const term = query.search.trim();
+      and.push({
+        OR: [
+          { title: { contains: term, mode: 'insensitive' } },
+          { description: { contains: term, mode: 'insensitive' } },
+          { tags: { has: term.toLowerCase() } },
+        ],
+      });
+    }
 
-    return products.map((p) => this.toResponse(p));
+    if (and.length) where.AND = and;
+
+    return where;
   }
 
   async findBySlug(slug: string): Promise<ProductResponseDto> {
@@ -102,7 +212,14 @@ export class ProductsService {
     return [...primary, ...fill].map((p) => this.toResponse(p));
   }
 
-  /** Distinct category slugs across the whole catalogue (for admin pickers). */
+  /**
+   * Distinct category slugs across the whole catalogue (for admin pickers).
+   *
+   * Deliberately NOT paginated: the result is a bounded set of slugs, and a
+   * picker that only showed the first page of categories would be wrong. The
+   * same COST caveat as {@link listFacets} applies — Prisma de-duplicates
+   * `distinct` in memory, so this reads one narrow column for every product.
+   */
   async listCategories(): Promise<string[]> {
     const rows = await this.prisma.product.findMany({
       distinct: ['category'],
@@ -141,7 +258,16 @@ export class ProductsService {
       price: p.price,
       compareAtPrice: p.compareAtPrice ?? undefined,
       images: p.images,
-      colors: p.colors.map((c) => ({ name: c.name, hex: c.hex })),
+      colors: p.colors.map((c) => ({
+        name: c.name,
+        hex: c.hex,
+        images: c.images,
+        sizes: c.sizes,
+        soldOutSizes: c.soldOutSizes,
+        price: c.price ?? undefined,
+        compareAtPrice: c.compareAtPrice ?? undefined,
+        stock: c.stock ?? undefined,
+      })),
       sizes: p.sizes,
       soldOutSizes: p.soldOutSizes,
       tags: p.tags,
@@ -154,6 +280,10 @@ export class ProductsService {
       fabric: p.fabric,
       care: p.care,
       stock: p.stock,
+      // Denormalized on Product and maintained by ReviewsService — no join here.
+      avgRating: p.avgRating,
+      reviewCount: p.reviewCount,
+      reviewsHidden: p.reviewsHidden,
     };
   }
 
@@ -193,14 +323,9 @@ export class ProductsService {
         care: dto.care,
         stock: dto.stock ?? 0,
         isActive: dto.isActive ?? true,
+        reviewsHidden: dto.reviewsHidden ?? false,
         colors: dto.colors?.length
-          ? {
-              create: dto.colors.map((c, i) => ({
-                name: c.name,
-                hex: c.hex,
-                position: c.position ?? i,
-              })),
-            }
+          ? { create: dto.colors.map((c, i) => this.toColorCreate(c, i)) }
           : undefined,
       },
       include: INCLUDE_COLORS,
@@ -210,9 +335,8 @@ export class ProductsService {
 
   /** Paginated admin catalogue — includes inactive products, filterable by status. */
   async adminList(params: AdminListParams): Promise<AdminProductListResponseDto> {
-    const skip = Math.max(0, params.skip ?? 0);
-    // Default page size ~10; clamp to 1..100 so a caller can't request the lot.
-    const take = Math.min(100, Math.max(1, params.take ?? 10));
+    // Defaults to page 1 × 10 rows and clamps `take` to 100 — see parsePagination.
+    const pagination = parsePagination(params);
 
     const where: Prisma.ProductWhereInput = {};
     if (params.status === 'active') where.isActive = true;
@@ -234,18 +358,16 @@ export class ProductsService {
         where,
         orderBy: this.resolveAdminSort(params.sort),
         include: INCLUDE_COLORS,
-        skip,
-        take,
+        skip: pagination.skip,
+        take: pagination.take,
       }),
     ]);
 
-    return {
-      data: rows.map((p) => this.toAdminResponse(p)),
+    return paginate(
+      rows.map((p) => this.toAdminResponse(p)),
       total,
-      skip,
-      take,
-      hasMore: skip + rows.length < total,
-    };
+      pagination,
+    );
   }
 
   /** Admin free-text search (same envelope as the list). */
@@ -288,6 +410,7 @@ export class ProductsService {
     if (dto.care !== undefined) data.care = dto.care;
     if (dto.stock !== undefined) data.stock = dto.stock;
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    if (dto.reviewsHidden !== undefined) data.reviewsHidden = dto.reviewsHidden;
 
     // Slug change (kept unique). Only when the caller passes a different slug.
     if (dto.slug && this.slugify(dto.slug) !== existing.slug) {
@@ -297,11 +420,7 @@ export class ProductsService {
     if (dto.colors !== undefined) {
       data.colors = {
         deleteMany: {},
-        create: dto.colors.map((c, i) => ({
-          name: c.name,
-          hex: c.hex,
-          position: c.position ?? i,
-        })),
+        create: dto.colors.map((c, i) => this.toColorCreate(c, i)),
       };
     }
 
@@ -344,6 +463,26 @@ export class ProductsService {
   }
 
   // ---- helpers --------------------------------------------------------------
+
+  /** Map a colour DTO to a Prisma nested-create row. A blank array / omitted
+   *  number is stored as-is (empty array / null) and means "inherit the
+   *  product-level default" — the storefront applies that fallback at render. */
+  private toColorCreate(
+    c: ProductColorDto,
+    index: number,
+  ): Prisma.ProductColorCreateWithoutProductInput {
+    return {
+      name: c.name,
+      hex: c.hex,
+      position: c.position ?? index,
+      images: c.images ?? [],
+      sizes: c.sizes ?? [],
+      soldOutSizes: c.soldOutSizes ?? [],
+      price: c.price ?? null,
+      compareAtPrice: c.compareAtPrice ?? null,
+      stock: c.stock ?? null,
+    };
+  }
 
   private toAdminResponse(p: ProductWithColors): AdminProductResponseDto {
     return {

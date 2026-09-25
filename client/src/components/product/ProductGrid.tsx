@@ -11,8 +11,12 @@ export function ProductGrid({
   isLoading,
   skeletonCount = 8,
   paginate = false,
-  pageSize = 12,
   autoLoadBatches = 2,
+  hasMore: hasMoreProp = false,
+  isLoadingMore = false,
+  onLoadMore,
+  total,
+  error,
 }: {
   products: Product[];
   isLoading?: boolean;
@@ -22,35 +26,44 @@ export function ProductGrid({
    * nears the bottom, then reveal a "Load more" button (clicking it re-arms
    * auto-loading for another `autoLoadBatches`). Opt-in — curated rows (home,
    * related products) leave this off and render everything they're given.
+   *
+   * Each batch is now a server request rather than a slice of an already-
+   * downloaded array; the caller supplies `hasMore`/`onLoadMore` from its
+   * infinite query, so `products` only ever holds what has actually loaded.
    */
   paginate?: boolean;
-  pageSize?: number;
   autoLoadBatches?: number;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
+  /** Total matching products, for the "Showing X of Y" line. */
+  total?: number;
+  /** Set when a batch failed, so the grid can offer a retry. */
+  error?: unknown;
 }) {
-  const [visibleCount, setVisibleCount] = useState(pageSize);
   const [autoLoadsUsed, setAutoLoadsUsed] = useState(0);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // Reset the window whenever the (faceted) list changes — callers memoise the
-  // array, so this fires on filter/sort/search changes, not every render.
+  // Reset the auto-load allowance whenever the (server-filtered) list changes,
+  // so a new search starts with a fresh couple of automatic batches.
   useEffect(() => {
-    setVisibleCount(pageSize);
     setAutoLoadsUsed(0);
-  }, [products, pageSize, paginate]);
+  }, [products.length === 0]);
 
-  const hasMore = paginate && visibleCount < products.length;
-  const canAutoLoad = hasMore && autoLoadsUsed < autoLoadBatches;
+  const hasMore = paginate && hasMoreProp;
+  const canAutoLoad = hasMore && !isLoadingMore && autoLoadsUsed < autoLoadBatches;
 
   // Auto-load the next batch when the sentinel scrolls into view, up to the
-  // per-run cap; then hand off to the "Load more" button.
+  // per-run cap; then hand off to the "Load more" button. `isLoadingMore`
+  // gates it so a fast scroll can't request the same page twice.
   useEffect(() => {
-    if (!canAutoLoad) return;
+    if (!canAutoLoad || !onLoadMore) return;
     const el = sentinelRef.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) {
-          setVisibleCount((c) => c + pageSize);
+          onLoadMore();
           setAutoLoadsUsed((n) => n + 1);
         }
       },
@@ -58,7 +71,7 @@ export function ProductGrid({
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [canAutoLoad, pageSize]);
+  }, [canAutoLoad, onLoadMore]);
 
   if (isLoading) {
     return (
@@ -81,30 +94,40 @@ export function ProductGrid({
     );
   }
 
-  const shown = paginate ? products.slice(0, visibleCount) : products;
-
   return (
     <div>
       <div className={GRID_CLASS}>
-        {shown.map((p) => (
+        {products.map((p) => (
           <ProductCard key={p.id} product={p} />
         ))}
       </div>
 
       {hasMore && (
         <div className="mt-12 flex flex-col items-center gap-4">
-          {canAutoLoad ? (
-            // Invisible sentinel: crossing it (400px early) reveals the next batch.
+          {error ? (
+            // A failed batch never clears what already loaded — offer a retry.
+            <>
+              <p className="text-xs text-mute-text">
+                Couldn&apos;t load more products.
+              </p>
+              <Button variant="outline" onClick={onLoadMore}>
+                Retry
+              </Button>
+            </>
+          ) : isLoadingMore ? (
+            <p className="text-xs text-mute-text">Loading more…</p>
+          ) : canAutoLoad ? (
+            // Invisible sentinel: crossing it (400px early) fetches the next batch.
             <div ref={sentinelRef} aria-hidden="true" className="h-px w-full" />
           ) : (
             <>
               <p className="text-xs text-mute-text">
-                Showing {shown.length} of {products.length}
+                Showing {products.length} of {total ?? products.length}
               </p>
               <Button
                 variant="outline"
                 onClick={() => {
-                  setVisibleCount((c) => c + pageSize);
+                  onLoadMore?.();
                   setAutoLoadsUsed(0); // re-arm auto-loading for the next run
                 }}
               >
