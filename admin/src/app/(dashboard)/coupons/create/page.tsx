@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,20 +33,31 @@ import { uploadService } from "@/services/upload.service";
 import { CouponImageUpload } from "@/components/coupons/coupon-image-upload";
 import useAxiosAuth from "@/hooks/use-axios-auth";
 
-const couponFormSchema = z.object({
-  couponCode: z.string().min(3, "Coupon code must be at least 3 characters"),
-  title: z.string().min(1, "Title is required"),
-  discountType: z.enum(["percentage", "fixed"]),
-  discountAmount: z.coerce.number().min(0, "Discount amount must be positive"),
-  minimumAmount: z.coerce.number().min(0, "Minimum amount must be positive"),
-  endDate: z.string().min(1, "End date is required"),
-  productType: z.string().optional(),
-  maxUsage: z
-    .union([z.coerce.number().min(1), z.literal("").transform(() => undefined)])
-    .optional(),
-  status: z.enum(["active", "inactive"]).optional(),
-  logo: z.string().optional(),
-});
+const couponFormSchema = z
+  .object({
+    couponCode: z.string().min(3, "Coupon code must be at least 3 characters"),
+    title: z.string().min(1, "Title is required"),
+    discountType: z.enum(["percentage", "fixed"]),
+    discountAmount: z.coerce.number().min(0, "Discount amount must be positive"),
+    minimumAmount: z.coerce.number().min(0, "Minimum amount must be positive"),
+    endDate: z.string().min(1, "End date is required"),
+    productType: z.string().optional(),
+    maxUsage: z
+      .union([z.coerce.number().min(1), z.literal("").transform(() => undefined)])
+      .optional(),
+    status: z.enum(["active", "inactive"]).optional(),
+    logo: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    // A percentage discount over 100% would give the whole order away (and then some).
+    if (data.discountType === "percentage" && data.discountAmount > 100) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["discountAmount"],
+        message: "Percentage discount can't exceed 100%",
+      });
+    }
+  });
 
 type CouponFormValues = z.infer<typeof couponFormSchema>;
 
@@ -113,6 +124,20 @@ export default function CreateCouponPage() {
     }
   };
 
+  // Build a readable random code — no ambiguous characters (0/O, 1/I) so it's
+  // easy to read off a screen or type by hand. The server uppercases anyway.
+  const generateCouponCode = () => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let code = "";
+    for (let i = 0; i < 8; i++) {
+      code += chars[Math.floor(Math.random() * chars.length)];
+    }
+    form.setValue("couponCode", code, {
+      shouldValidate: true,
+      shouldDirty: true,
+    });
+  };
+
   const handleFileSelect = (file: File | null) => {
     setSelectedFile(file);
     if (file) {
@@ -161,13 +186,27 @@ export default function CreateCouponPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Coupon Code *</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="e.g., SAVE20"
-                          {...field}
+                      <div className="flex gap-2">
+                        <FormControl>
+                          <Input
+                            placeholder="e.g., SAVE20"
+                            {...field}
+                            disabled={isSubmitting}
+                            className="uppercase"
+                          />
+                        </FormControl>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={generateCouponCode}
                           disabled={isSubmitting}
-                        />
-                      </FormControl>
+                          title="Generate random code"
+                          aria-label="Generate random coupon code"
+                        >
+                          <Wand2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                       <FormDescription>Unique coupon code</FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -223,26 +262,39 @@ export default function CreateCouponPage() {
                 <FormField
                   control={form.control}
                   name="discountAmount"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Discount Amount *</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          placeholder="e.g., 20"
-                          {...field}
-                          value={(field.value as string | number) ?? ""}
-                          disabled={isSubmitting}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {form.watch("discountType") === "percentage"
-                          ? "Percentage (%)"
-                          : "Amount (₹)"}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
+                  render={({ field }) => {
+                    const isPercentage =
+                      form.watch("discountType") === "percentage";
+                    return (
+                      <FormItem>
+                        <FormLabel>Discount Amount *</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={isPercentage ? 100 : undefined}
+                            placeholder="e.g., 20"
+                            {...field}
+                            value={(field.value as string | number) ?? ""}
+                            onChange={(e) => {
+                              // Hard-cap at 100 while percentage so you can't
+                              // even type a larger number.
+                              let v = e.target.value;
+                              if (isPercentage && v !== "" && Number(v) > 100) {
+                                v = "100";
+                              }
+                              field.onChange(v);
+                            }}
+                            disabled={isSubmitting}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {isPercentage ? "Percentage (0–100%)" : "Amount (₹)"}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    );
+                  }}
                 />
               </div>
 

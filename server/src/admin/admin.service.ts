@@ -10,6 +10,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BCRYPT_SALT_ROUNDS } from '../common/constants/auth.constant';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
+import {
+  PaginationQuery,
+  paginate,
+  parsePagination,
+} from '../common/pagination';
 
 const ADMIN_ROLE = 'admin';
 
@@ -43,13 +48,40 @@ const adminSelect = {
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** List every admin, newest first. */
-  findAll() {
-    return this.prisma.user.findMany({
-      where: { role: ADMIN_ROLE },
-      select: adminSelect,
-      orderBy: { createdAt: 'desc' },
-    });
+  /** One page of admins, newest first, searchable by name or email. */
+  async findAll(query: PaginationQuery & { search?: string } = {}) {
+    const params = parsePagination(query);
+    const where: Prisma.UserWhereInput = { role: ADMIN_ROLE };
+
+    const term = query.search?.trim();
+    if (term) {
+      where.OR = [
+        { email: { contains: term, mode: 'insensitive' } },
+        {
+          profiles: {
+            some: {
+              OR: [
+                { firstName: { contains: term, mode: 'insensitive' } },
+                { lastName: { contains: term, mode: 'insensitive' } },
+              ],
+            },
+          },
+        },
+      ];
+    }
+
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.user.count({ where }),
+      this.prisma.user.findMany({
+        where,
+        select: adminSelect,
+        orderBy: { createdAt: 'desc' },
+        skip: params.skip,
+        take: params.take,
+      }),
+    ]);
+
+    return paginate(data, total, params);
   }
 
   /** Fetch a single admin by id (404 if the id isn't an admin). */

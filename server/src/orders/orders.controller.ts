@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -21,7 +22,12 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UserWithRelations } from '../types/database.types';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto, OrderResponseDto } from './dto/order.dto';
+import {
+  CreateOrderDto,
+  OrderListResponseDto,
+  OrderResponseDto,
+} from './dto/order.dto';
+import { PaginationQueryDto } from '../common/pagination';
 
 @ApiTags('Orders')
 @ApiBearerAuth('jwt')
@@ -49,14 +55,20 @@ export class OrdersController {
     return this.ordersService.create(user.id, dto);
   }
 
-  /** The authenticated user's order history (newest first). */
+  /** The authenticated user's order history (newest first, paginated). */
   @Get('me')
-  @ApiOperation({ summary: "Get the current user's order history" })
-  @ApiOkResponse({ description: 'The order history.', type: [OrderResponseDto] })
+  @ApiOperation({
+    summary: "Get the current user's order history",
+    description: 'Paginated — defaults to page 1 × 10 orders.',
+  })
+  @ApiOkResponse({ description: 'The order history.', type: OrderListResponseDto })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid token.' })
-  findMine(@Req() req: Request): Promise<OrderResponseDto[]> {
+  findMine(
+    @Req() req: Request,
+    @Query() query: PaginationQueryDto,
+  ): Promise<OrderListResponseDto> {
     const user = req.user as UserWithRelations;
-    return this.ordersService.findMine(user.id);
+    return this.ordersService.findMine(user.id, query);
   }
 
   /** A single order by its number (only the owner can read it). */

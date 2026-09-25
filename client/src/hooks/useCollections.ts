@@ -1,7 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api-client";
 import { API_ENDPOINTS } from "@/lib/api-endpoints";
+import { toPaginated, toQueryString, type Paginated } from "@/lib/pagination";
 import { collections as staticCollections } from "@/data/collections";
+
+/** The storefront nav renders every collection; this is the server's cap. */
+const COLLECTIONS_LIMIT = 100;
 
 // Editorial collections ("Shop by mood") come from the NestJS backend and are
 // managed in the admin (photo, title, subtitle, description, order, enabled).
@@ -28,9 +32,14 @@ export interface ApiCollection {
  * React Query's initialData (so the first paint already has them, no flash).
  */
 export async function fetchEnabledCollections(): Promise<ApiCollection[]> {
-  const all = await apiFetch<ApiCollection[]>(API_ENDPOINTS.collections.list);
-  return all
-    .filter((c) => c.enabled)
+  // The endpoint is paginated, but its default page is sized for exactly this
+  // read — the nav lists every collection at once. `toPaginated` also accepts
+  // a bare array, so an older API build still works.
+  const raw = await apiFetch<Paginated<ApiCollection> | ApiCollection[]>(
+    `${API_ENDPOINTS.collections.list}${toQueryString({ limit: COLLECTIONS_LIMIT })}`,
+  );
+  return toPaginated<ApiCollection>(raw, COLLECTIONS_LIMIT)
+    .data.filter((c) => c.enabled)
     .sort((a, b) => a.order - b.order);
 }
 

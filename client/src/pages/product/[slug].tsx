@@ -12,7 +12,9 @@ import { ProductGrid } from "@/components/product/ProductGrid";
 import { Button } from "@/components/ui/button";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Heart } from "lucide-react";
-import { useProduct, useRelatedProducts, useProducts } from "@/hooks/useProducts";
+import { ProductReviews } from "@/components/reviews/ProductReviews";
+import { RatingSummary } from "@/components/reviews/StarRating";
+import { useProduct, useRelatedProducts, useProductsPage } from "@/hooks/useProducts";
 import { formatINR } from "@/lib/format";
 import { useAppDispatch, useAppSelector } from "@/redux/hooks";
 import { add_cart_product } from "@/redux/features/cart-slice";
@@ -22,6 +24,9 @@ import { selectRecentlyViewedIds, push_recently_viewed } from "@/redux/features/
 import { useHydrated } from "@/hooks/useHydrated";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import type { Product } from "@/types";
+
+/** Products shown in the "recently viewed" row. */
+const RECENTLY_VIEWED_MAX = 4;
 
 export default function ProductDetailPage() {
   const router = useRouter();
@@ -76,7 +81,15 @@ function ProductDetailView({ product }: { product: Product }) {
   const recentIds = useAppSelector(selectRecentlyViewedIds);
 
   const { data: related = [], isLoading: relatedLoading } = useRelatedProducts(product.slug);
-  const { data: allProducts = [] } = useProducts();
+  // Recently viewed: fetch just the saved ids rather than the catalogue.
+  // Capped at RECENTLY_VIEWED_MAX, which is all the row renders anyway.
+  const recentlyViewedIds = recentIds
+    .filter((id) => id !== product.id)
+    .slice(0, RECENTLY_VIEWED_MAX);
+  const { data: recentlyViewedPage } = useProductsPage(
+    { ids: recentlyViewedIds, limit: RECENTLY_VIEWED_MAX },
+    { enabled: recentlyViewedIds.length > 0 },
+  );
 
   useEffect(() => {
     // Push after mount so we don't run on the server.
@@ -84,7 +97,33 @@ function ProductDetailView({ product }: { product: Product }) {
   }, [product.id, dispatch]);
 
   const isBottom = ["trousers", "jeans", "shorts"].includes(product.category);
-  const soldOut = product.soldOutSizes ?? [];
+
+  // Resolve the selected colour to a full variant. Any field the colour leaves
+  // blank inherits the product-level default, so single-colour / legacy
+  // products behave exactly as before.
+  const colorObj = product.colors.find((c) => c.name === color);
+  const usesColorSizes = (colorObj?.sizes?.length ?? 0) > 0;
+  const images = colorObj?.images?.length ? colorObj.images : product.images;
+  const sizes = usesColorSizes ? colorObj!.sizes! : product.sizes;
+  // Sold-out set must pair with whichever size run is shown: the colour's own
+  // set when it has one; the product's only while inheriting the product sizes.
+  const soldOut =
+    (colorObj?.soldOutSizes?.length
+      ? colorObj.soldOutSizes
+      : usesColorSizes
+        ? []
+        : product.soldOutSizes) ?? [];
+  const price = colorObj?.price ?? product.price;
+  const compareAtPrice = colorObj?.compareAtPrice ?? product.compareAtPrice;
+
+  // Switching colour keeps the chosen size only if the new colour still offers
+  // it; otherwise it clears so the shopper re-picks from that colour's run.
+  const handleColorChange = (name: string) => {
+    setColor(name);
+    const next = product.colors.find((c) => c.name === name);
+    const nextSizes = next?.sizes?.length ? next.sizes : product.sizes;
+    setSize((prev) => (prev && nextSizes.includes(prev) ? prev : null));
+  };
 
   const onAdd = () => {
     requireAuth(() => {
@@ -96,8 +135,8 @@ function ProductDetailView({ product }: { product: Product }) {
         productId: product.id,
         slug: product.slug,
         title: product.title,
-        image: product.images[0],
-        price: product.price,
+        image: images[0],
+        price,
         size,
         color,
         quantity: 1,
@@ -107,47 +146,62 @@ function ProductDetailView({ product }: { product: Product }) {
     });
   };
 
-  const recentlyViewed = recentIds
-    .filter((id) => id !== product.id)
-    .map((id) => allProducts.find((p) => p.id === id))
-    .filter((p): p is Product => Boolean(p))
-    .slice(0, 4);
+  // Restore the most-recent-first order the ids came in.
+  const recentlyViewedById = new Map(
+    (recentlyViewedPage?.data ?? []).map((p) => [p.id, p]),
+  );
+  const recentlyViewed = recentlyViewedIds
+    .map((id) => recentlyViewedById.get(id))
+    .filter((p): p is Product => Boolean(p));
 
   return (
     <>
       <SEO
         title={`${product.title} — Jakalburg`}
         description={product.description}
-        image={product.images[0]}
+        image={images[0]}
         canonicalPath={`/product/${product.slug}`}
         type="product"
       />
       <SiteLayout>
         <section className="container-vh grid gap-10 py-10 lg:grid-cols-2">
-          <ProductGallery images={product.images} alt={product.title} />
+          {/* key={color} resets the gallery's active index when the colour's
+              image set changes, so it never points past the new array. */}
+          <ProductGallery key={color} images={images} alt={product.title} />
 
           <div className="lg:sticky lg:top-24 lg:self-start">
             <p className="eyebrow text-mute-text">{product.gender}</p>
             <h1 className="mt-2 text-2xl md:text-3xl">{product.title}</h1>
+            {/* Renders nothing until the product has an approved review — see
+                RatingSummary. Links down to the section rather than repeating it.
+                Skipped entirely when an admin has hidden reviews for this product. */}
+            {!product.reviewsHidden && (
+              <a href="#reviews" className="mt-2 inline-block hover:underline">
+                <RatingSummary average={product.avgRating} count={product.reviewCount} />
+              </a>
+            )}
             <div className="mt-3 flex items-baseline gap-3">
-              <p className="text-lg">{formatINR(product.price)}</p>
-              {product.compareAtPrice && (
-                <p className="text-sm text-mute-text line-through">{formatINR(product.compareAtPrice)}</p>
+              <p className="text-lg">{formatINR(price)}</p>
+              {compareAtPrice && (
+                <p className="text-sm text-mute-text line-through">{formatINR(compareAtPrice)}</p>
               )}
             </div>
             <p className="mt-6 max-w-md text-sm text-muted-foreground">{product.description}</p>
 
             <div className="mt-8 space-y-6">
-              <ColorSelector colors={product.colors} value={color} onChange={setColor} />
+              <ColorSelector colors={product.colors} value={color} onChange={handleColorChange} />
               <div>
                 <div className="mb-2 flex items-center justify-between">
                   <p className="eyebrow text-mute-text">Size</p>
                   <SizeGuide kind={isBottom ? "bottoms" : "tops"} />
                 </div>
-                <SizeSelector sizes={product.sizes} soldOut={soldOut} value={size} onChange={setSize} />
+                <SizeSelector sizes={sizes} soldOut={soldOut} value={size} onChange={setSize} />
               </div>
               <div className="flex gap-2">
                 <Button size="lg" className="flex-1" onClick={onAdd}>Add to bag</Button>
+                {/* Always `outline` — the container never changes. Wishlist
+                    state is carried entirely by the heart: solid red when saved,
+                    outline otherwise, matching ProductCard. */}
                 <Button
                   size="lg"
                   variant="outline"
@@ -159,7 +213,11 @@ function ProductDetailView({ product }: { product: Product }) {
                     })
                   }
                 >
-                  <Heart className={`size-4 ${hydrated && wishHas ? "text-red-500" : "text-foreground"}`} style={{ fill: "currentColor" }} aria-hidden="true" />
+                  <Heart
+                    className={`size-4 transition-colors ${hydrated && wishHas ? "text-red-500" : "text-foreground"}`}
+                    style={{ fill: hydrated && wishHas ? "currentColor" : "none" }}
+                    aria-hidden="true"
+                  />
                 </Button>
               </div>
             </div>
@@ -181,6 +239,12 @@ function ProductDetailView({ product }: { product: Product }) {
             </Accordion>
           </div>
         </section>
+
+        {!product.reviewsHidden && (
+          <div id="reviews" className="scroll-mt-24">
+            <ProductReviews slug={product.slug} />
+          </div>
+        )}
 
         {(relatedLoading || related.length > 0) && (
           <section className="container-vh py-16">

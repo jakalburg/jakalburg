@@ -5,6 +5,9 @@ enum OrderStatus {
   processing
   shipped
   delivered
+  cancelled
+  returned
+  refunded
 }
 
 model Order {
@@ -16,15 +19,40 @@ model Order {
   subtotal        Int
   shipping        Int         @default(0)
   discount        Int         @default(0)
+  couponCode      String? // the coupon applied at checkout, if any (denormalized; the Coupon row may later change)
   total           Int
   status          OrderStatus @default(processing)
+  // The granular status label the admin last chose (e.g. out_for_delivery,
+  // rejected, rto_received, confirmed). Several admin labels collapse onto one
+  // `status` enum value; this keeps the exact choice so the dashboard shows and
+  // re-selects it correctly. Null = never set (fall back to `status`). The
+  // customer-facing enum stays in `status`.
+  adminStatus     String?
   shippingAddress Json // frozen snapshot of the shipping Address at checkout
   email           String
   paymentLabel    String // masked display string only (e.g. "Card ending •••• 4242"); no payment data stored
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
+  // ── Google Sheets mirror (google_sheets_appscript.gs) ──────────────────
+  // Whether this order made it into the owner's spreadsheet. Purely a record
+  // of the last sync attempt — the sheet itself is the copy, never the source
+  // of truth, and a failed sync never blocks or invalidates the order.
+  // "pending" (or null, for orders placed before the sync existed) = never
+  // attempted, "synced" = written, "failed" = the script or network rejected
+  // it and `sheetSyncError` holds why, so the admin can retry from the order.
+  sheetSyncStatus String?
+  sheetSyncedAt   DateTime?
+  sheetSyncError  String?
+
+  // Reviews written off the back of this order (only possible once delivered).
+  reviews Review[]
+
   @@index([userId])
+  // Order history and the admin table are both paginated newest-first.
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([createdAt])
 }
 
 model OrderItem {

@@ -7,7 +7,7 @@ export default function DeliveryRedirect() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/logistics?tab=delivery");
+    router.replace("/logistics/delivery");
   }, [router]);
 
   return null;

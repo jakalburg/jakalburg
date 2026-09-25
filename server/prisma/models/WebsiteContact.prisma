@@ -1,0 +1,25 @@
+// Singleton row of editable "Contact" page content — the admin's
+// Website → Contact Page tab writes it; the storefront /contact page reads it
+// (public). One row only; the service creates it on first read and updates it in
+// place. All fields optional so a fresh install renders sensible fallbacks.
+//
+// `mapLink` is optional; when set, the storefront links the store address to it.
+model WebsiteContact {
+  id String @id @default(cuid())
+
+  // Global store contact details, shown on the /contact page.
+  email   String? // support / contact email
+  phone   String? // support / contact phone
+  address String? // full store address (rendered as the "Studio"/address block)
+  mapLink String? // Google Maps URL — optional; address links to it when present
+
+  // Contact-page copy shown beside the form.
+  title                String? // heading, e.g. "We're here to help."
+  formDescription      String? // supporting paragraph under the heading
+  needTodayTitle       String?
+  needTodayDescription String?
+  contactImage         String? // admin-side banner (not rendered on the storefront)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

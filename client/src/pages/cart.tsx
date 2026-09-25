@@ -16,6 +16,8 @@ import {
   update_cart_quantity,
 } from "@/redux/features/cart-slice";
 import { useHydrated } from "@/hooks/useHydrated";
+import { apiFetch, ApiError } from "@/lib/api-client";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
 import { formatINR } from "@/lib/format";
 
 export default function CartPage() {
@@ -27,11 +29,38 @@ export default function CartPage() {
   const update = (key: string, qty: number) => dispatch(update_cart_quantity({ key, qty }));
   const [promo, setPromo] = useState("");
   const [promoStatus, setPromoStatus] = useState<null | string>(null);
+  const [promoChecking, setPromoChecking] = useState(false);
 
-  const applyPromo = (e: React.FormEvent) => {
+  // Preview a code against the current subtotal. It's actually applied at
+  // checkout (where the order is placed) — here we just give quick feedback so
+  // shoppers know their code works before they get there.
+  const applyPromo = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!promo.trim()) return;
-    setPromoStatus("Promo codes are visual only in this demo.");
+    const code = promo.trim();
+    if (!code || promoChecking) return;
+    setPromoChecking(true);
+    setPromoStatus(null);
+    try {
+      const result = await apiFetch<{
+        valid: boolean;
+        message: string;
+        discountAmount: number;
+      }>(API_ENDPOINTS.coupons.validate, {
+        method: "POST",
+        body: { code, subtotal },
+      });
+      setPromoStatus(
+        result.valid
+          ? `${code.toUpperCase()} saves ${formatINR(result.discountAmount)} — enter it at checkout to apply.`
+          : result.message || "That code can't be applied.",
+      );
+    } catch (err) {
+      setPromoStatus(
+        err instanceof ApiError ? err.message : "Couldn't check that code.",
+      );
+    } finally {
+      setPromoChecking(false);
+    }
   };
 
   return (
@@ -91,8 +120,8 @@ export default function CartPage() {
                     <div className="flex justify-between text-mute-text"><span>Shipping</span><span>Calculated at checkout</span></div>
                   </div>
                   <form onSubmit={applyPromo} className="mt-6 flex gap-2">
-                    <Input placeholder="Promo code" value={promo} onChange={(e) => setPromo(e.target.value)} aria-label="Promo code" />
-                    <Button type="submit" variant="outline">Apply</Button>
+                    <Input placeholder="Promo code" value={promo} onChange={(e) => setPromo(e.target.value)} aria-label="Promo code" className="uppercase" autoCapitalize="characters" autoComplete="off" />
+                    <Button type="submit" variant="outline" loading={promoChecking} disabled={!promo.trim()}>Apply</Button>
                   </form>
                   {promoStatus && <p className="mt-2 text-xs text-mute-text">{promoStatus}</p>}
                   <Separator className="my-4" />

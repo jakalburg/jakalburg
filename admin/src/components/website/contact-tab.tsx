@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
 import { useGetContact, useUpdateContact } from "@/hooks/use-website-pages";
 import { ImageUpload } from "@/components/products/image-upload";
 import { uploadService } from "@/services/upload.service";
@@ -32,9 +31,8 @@ const DEFAULT_CONTACT_IMAGE =
   "https://res.cloudinary.com/diukjb3ma/image/upload/v1773753711/Sculptures/main_about.png";
 
 export function ContactTab() {
-  const { data: storeSettings, isLoading: isLoadingStore } = useSettings();
-  const updateStoreMutation = useUpdateSettings();
-
+  // Store details + page copy now live in ONE real source (server WebsiteContact),
+  // so the storefront /contact page shows exactly what's edited here.
   const { data: contactData, isLoading: isLoadingContact } = useGetContact();
   const updateContactMutation = useUpdateContact();
 
@@ -72,12 +70,10 @@ export function ContactTab() {
   const [needTodayDescriptionOverride, setNeedTodayDescriptionOverride] =
     useState<string | null>(null);
 
-  const storeEmail = storeEmailOverride ?? storeSettings?.storeEmail ?? "";
-  const storePhone = storePhoneOverride ?? storeSettings?.storePhone ?? "";
-  const storeAddress =
-    storeAddressOverride ?? storeSettings?.storeAddress ?? "";
-  const storeMapLink =
-    storeMapLinkOverride ?? storeSettings?.storeMapLink ?? "";
+  const storeEmail = storeEmailOverride ?? contactData?.email ?? "";
+  const storePhone = storePhoneOverride ?? contactData?.phone ?? "";
+  const storeAddress = storeAddressOverride ?? contactData?.address ?? "";
+  const storeMapLink = storeMapLinkOverride ?? contactData?.mapLink ?? "";
   const contactTitle = contactTitleOverride ?? contactData?.title ?? "";
   const contactDescription =
     contactDescriptionOverride ?? contactData?.formDescription ?? "";
@@ -133,22 +129,13 @@ export function ContactTab() {
     try {
       const contactImageUrl = await resolveContactImageUrl();
 
-      // 2. Save Global Settings
-      updateStoreMutation.mutate(
-        {
-          storeEmail,
-          storePhone,
-          storeAddress,
-          storeMapLink,
-        },
-        {
-          onError: () => toast.error("Failed to save global store info"),
-        },
-      );
-
-      // 3. Save Contact Page specific strings
+      // Store details + page copy are one record now — a single save.
       updateContactMutation.mutate(
         {
+          email: storeEmail,
+          phone: storePhone,
+          address: storeAddress,
+          mapLink: storeMapLink,
           contactImage: contactImageUrl,
           title: contactTitle,
           formDescription: contactDescription,
@@ -160,7 +147,7 @@ export function ContactTab() {
             setIsEditing(false);
             toast.success("Contact configurations saved successfully");
           },
-          onError: () => toast.error("Failed to save contact text elements"),
+          onError: () => toast.error("Failed to save contact configurations"),
         },
       );
     } catch {
@@ -168,7 +155,7 @@ export function ContactTab() {
     }
   };
 
-  const isLoadingTotal = isLoadingStore || isLoadingContact;
+  const isLoadingTotal = isLoadingContact;
 
   return (
     <div className="space-y-6">
@@ -198,10 +185,7 @@ export function ContactTab() {
                 </Button>
                 <Button
                   onClick={handleSaveContact}
-                  disabled={
-                    updateStoreMutation.isPending ||
-                    updateContactMutation.isPending
-                  }
+                  disabled={updateContactMutation.isPending}
                 >
                   Save All
                 </Button>
@@ -253,13 +237,17 @@ export function ContactTab() {
               </div>
 
               <div className="space-y-2">
-                <Label>Google Maps Link (Embed or URL)</Label>
+                <Label>Google Maps Link (optional)</Label>
                 <Input
                   value={storeMapLink}
                   onChange={(e) => setStoreMapLinkOverride(e.target.value)}
                   disabled={!isEditing}
                   placeholder="https://maps.google.com/..."
                 />
+                <p className="text-xs text-muted-foreground">
+                  Optional. When set, the store address on the storefront Contact
+                  page links to this map.
+                </p>
               </div>
             </>
           )}
@@ -314,53 +302,7 @@ export function ContactTab() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Need It Today Heading</Label>
-                  <Input
-                    value={needTodayTitle}
-                    onChange={(e) =>
-                      setNeedTodayTitleOverride(e.target.value)
-                    }
-                    disabled={!isEditing}
-                    placeholder="Need It Today?"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Need It Today Description</Label>
-                  <Textarea
-                    value={needTodayDescription}
-                    onChange={(e) =>
-                      setNeedTodayDescriptionOverride(e.target.value)
-                    }
-                    disabled={!isEditing}
-                    rows={3}
-                    placeholder="For order help, styling questions, custom requests, or instant delivery in Surat..."
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-muted-foreground font-semibold">
-                  Contact Banner Image
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  This image is shown on the Contact page beside the form.
-                </p>
-                <div
-                  className={!isEditing ? "opacity-50 pointer-events-none" : ""}
-                >
-                  <ImageUpload
-                    images={contactImage}
-                    onChange={(files) => setContactImageOverride(files)}
-                    maxImages={1}
-                    replaceWhenFull
-                    showPrimary={false}
-                    inputId="contact-banner-image-upload"
-                    uploadLabel="Upload contact page banner image"
-                  />
-                </div>
-              </div>
+      
             </div>
           )}
         </CardContent>

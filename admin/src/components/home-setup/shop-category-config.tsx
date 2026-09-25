@@ -78,10 +78,12 @@ export function ShopCategoryConfigModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingUploadId = useRef<string | null>(null);
 
-  const { data: collections = [] } = useQuery({
-    queryKey: ["collections"],
-    queryFn: () => collectionsService(api).getAll(),
+  // Bounded single page — this picker lists every collection to choose 2 from.
+  const { data: collectionPage } = useQuery({
+    queryKey: ["collections", "shop-category-config"],
+    queryFn: () => collectionsService(api).getAll({ limit: 100 }),
   });
+  const collections = collectionPage?.data ?? [];
 
   // Enforce exactly 2 items
   useEffect(() => {

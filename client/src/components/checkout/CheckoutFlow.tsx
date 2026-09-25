@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
+import { Pencil } from "lucide-react";
 import { z } from "zod";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -15,10 +16,29 @@ import { selectCartItems, selectCartSubtotal, clear_cart } from "@/redux/feature
 import { selectProfile, selectAddresses, add_address, update_profile, type Profile } from "@/redux/features/addresses-slice";
 import { selectAuthUser } from "@/redux/features/auth-slice";
 import { useCreateOrder } from "@/hooks/useOrders";
+import { apiFetch, ApiError } from "@/lib/api-client";
+import { API_ENDPOINTS } from "@/lib/api-endpoints";
 import { formatINR } from "@/lib/format";
+import { getLocalStorage, setLocalStorage } from "@/utils/localstorage";
+import { useHydrated } from "@/hooks/useHydrated";
 import type { Address } from "@/types";
 import { DemoBanner } from "@/components/common/DemoBanner";
 import { suppressNextRouteLoader } from "@/components/common/route-loader";
+
+// Server response from POST /coupons/validate.
+interface ValidateCouponResult {
+  valid: boolean;
+  message: string;
+  discountAmount: number;
+  couponCode?: string;
+  discountType?: "percentage" | "fixed";
+}
+
+// A coupon the shopper has successfully applied to this checkout.
+interface AppliedCoupon {
+  code: string;
+  discount: number;
+}
 
 const contactSchema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -44,6 +64,21 @@ const shippingRates: Record<Shipping, { label: string; price: number; eta: strin
   express: { label: "Express", price: 199, eta: "1–2 business days" },
 };
 
+// Persisted checkout choices, so a shopper who has been through the flow once
+// lands straight on "review" next time instead of re-walking every step. Only
+// the *choices* live here — never card/UPI details (see the payment section).
+// Email lives in the address book's `profile`; the shipping address in the
+// address book itself. This record just holds which address + the two method
+// picks, plus a flag that the shopper completed the flow at least once.
+const CHECKOUT_PREFS_KEY = "checkout_prefs";
+
+interface CheckoutPrefs {
+  completed: boolean;
+  addressId: string;
+  shipping: Shipping;
+  payMethod: PayMethod;
+}
+
 export function CheckoutFlow() {
   const dispatch = useAppDispatch();
   const router = useRouter();
@@ -52,6 +87,7 @@ export function CheckoutFlow() {
   const profile = useAppSelector(selectProfile);
   const savedAddresses = useAppSelector(selectAddresses);
   const user = useAppSelector(selectAuthUser);
+  const hydrated = useHydrated();
   const createOrder = useCreateOrder();
   const clearCart = () => dispatch(clear_cart());
   const addAddress = (a: Address) => dispatch(add_address(a));
@@ -68,6 +104,14 @@ export function CheckoutFlow() {
   const [shipping, setShipping] = useState<Shipping>("standard");
   const [payMethod, setPayMethod] = useState<PayMethod>("card");
 
+  // Coupon: the shopper types a code and applies it; the server prices the
+  // discount against the live subtotal (we never trust a client-computed
+  // amount). The applied discount is re-validated on "Place order" server-side.
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+
   // Preselect the default (or first) saved address once the book hydrates.
   useEffect(() => {
     if (!selectedAddressId && savedAddresses.length > 0) {
@@ -75,6 +119,56 @@ export function CheckoutFlow() {
       setSelectedAddressId(preferred.id);
     }
   }, [savedAddresses, selectedAddressId]);
+
+  // Returning shopper: if they completed checkout before and every saved choice
+  // still resolves, drop them straight on "review" rather than re-walking the
+  // four steps. Runs once, after hydration, and only when the address book has
+  // loaded — a missing/deleted address quietly falls back to the normal flow.
+  // Back buttons and the per-field edit icons remain the way out of "review".
+  const autoJumpedRef = useRef(false);
+  useEffect(() => {
+    if (!hydrated || autoJumpedRef.current) return;
+
+    const prefs = getLocalStorage<CheckoutPrefs | null>(CHECKOUT_PREFS_KEY, null);
+    // Never jump into review over an empty bag — the empty-cart branch wins.
+    if (!prefs?.completed || items.length === 0) {
+      autoJumpedRef.current = true;
+      return;
+    }
+
+    const savedAddress = savedAddresses.find((a) => a.id === prefs.addressId);
+    if (!savedAddress) {
+      // Book still hydrating → try again on the next change; genuinely gone →
+      // give up and let the shopper pick again from the top.
+      if (savedAddresses.length > 0) autoJumpedRef.current = true;
+      return;
+    }
+
+    const email = contact.email || user?.email || profile.email || "";
+    if (!email) {
+      autoJumpedRef.current = true;
+      return;
+    }
+
+    autoJumpedRef.current = true;
+    if (email !== contact.email) setContact({ email });
+    setAddress(savedAddress);
+    setSelectedAddressId(savedAddress.id);
+    setShipping(prefs.shipping);
+    setPayMethod(prefs.payMethod);
+    setStep("review");
+  }, [hydrated, savedAddresses, items.length, contact.email, user?.email, profile.email]);
+
+  // Remember the completed set of choices so the next visit can skip to review.
+  // Card/UPI inputs are deliberately excluded — only the payment *method* is kept.
+  const rememberCheckoutChoices = (chosen: Address) => {
+    setLocalStorage<CheckoutPrefs>(CHECKOUT_PREFS_KEY, {
+      completed: true,
+      addressId: chosen.id,
+      shipping,
+      payMethod,
+    });
+  };
 
   // Transient payment inputs — NEVER written to any store or the mock order
   // beyond a masked display label at review time.
@@ -93,7 +187,46 @@ export function CheckoutFlow() {
   });
 
   const shippingCost = shippingRates[shipping].price;
-  const total = subtotal + shippingCost;
+  // Cap the discount at the subtotal so the total never goes negative — matches
+  // the server, which clamps the same way.
+  const discount = Math.min(appliedCoupon?.discount ?? 0, subtotal);
+  const total = Math.max(0, subtotal + shippingCost - discount);
+
+  const applyCoupon = async () => {
+    const code = couponInput.trim();
+    if (!code || couponLoading) return;
+    setCouponLoading(true);
+    setCouponError(null);
+    try {
+      const result = await apiFetch<ValidateCouponResult>(
+        API_ENDPOINTS.coupons.validate,
+        { method: "POST", body: { code, subtotal } },
+      );
+      if (!result.valid) {
+        setAppliedCoupon(null);
+        setCouponError(result.message || "This coupon can't be applied.");
+        return;
+      }
+      setAppliedCoupon({
+        code: result.couponCode ?? code.toUpperCase(),
+        discount: result.discountAmount,
+      });
+      toast.success("Coupon applied");
+    } catch (err) {
+      setAppliedCoupon(null);
+      setCouponError(
+        err instanceof ApiError ? err.message : "Couldn't check that coupon.",
+      );
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const removeCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponError(null);
+    setCouponInput("");
+  };
 
   const paymentLabel = (): string => {
     if (payMethod === "cod") return "Cash on Delivery";
@@ -150,7 +283,10 @@ export function CheckoutFlow() {
           quantity: i.quantity,
         })),
         shipping: shippingCost,
-        discount: 0,
+        // The server recomputes the discount from couponCode; discount is sent
+        // only for display parity and is ignored server-side.
+        discount,
+        couponCode: appliedCoupon?.code,
         address,
         email: contact.email,
         paymentLabel: paymentLabel(),
@@ -175,6 +311,20 @@ export function CheckoutFlow() {
       },
     );
   };
+
+  // Per-field edit affordance on the review step — jump back to the step that
+  // owns a detail, tweak it, then continue. Matters most for the returning
+  // shopper who was dropped straight on review.
+  const editField = (label: string, target: Step) => (
+    <button
+      type="button"
+      onClick={() => setStep(target)}
+      aria-label={`Edit ${label}`}
+      className="text-mute-text transition-colors hover:text-foreground"
+    >
+      <Pencil className="h-3.5 w-3.5" />
+    </button>
+  );
 
   const stepOrder: Step[] = ["contact", "address", "shipping", "payment", "review"];
   const stepIdx = stepOrder.indexOf(step);
@@ -387,7 +537,16 @@ export function CheckoutFlow() {
 
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep("shipping")}>Back</Button>
-              <Button onClick={() => setStep("review")}>Review order</Button>
+              <Button
+                onClick={() => {
+                  // All four choices are settled by now — persist them so a
+                  // return visit lands on review instead of the first step.
+                  if (address) rememberCheckoutChoices(address);
+                  setStep("review");
+                }}
+              >
+                Review order
+              </Button>
             </div>
           </div>
         )}
@@ -397,12 +556,18 @@ export function CheckoutFlow() {
             <h2 className="text-xl">Review</h2>
             <div className="grid gap-4 border p-4 text-sm">
               <div>
-                <p className="eyebrow text-mute-text">Contact</p>
+                <div className="flex items-center justify-between">
+                  <p className="eyebrow text-mute-text">Contact</p>
+                  {editField("contact", "contact")}
+                </div>
                 <p>{contact.email}</p>
               </div>
               <Separator />
               <div>
-                <p className="eyebrow text-mute-text">Ship to</p>
+                <div className="flex items-center justify-between">
+                  <p className="eyebrow text-mute-text">Ship to</p>
+                  {editField("shipping address", "address")}
+                </div>
                 <p>{address.fullName}</p>
                 <p>{address.line1}{address.line2 ? `, ${address.line2}` : ""}</p>
                 <p>{address.city}, {address.state} {address.pincode}</p>
@@ -410,12 +575,18 @@ export function CheckoutFlow() {
               </div>
               <Separator />
               <div>
-                <p className="eyebrow text-mute-text">Shipping</p>
+                <div className="flex items-center justify-between">
+                  <p className="eyebrow text-mute-text">Shipping</p>
+                  {editField("shipping method", "shipping")}
+                </div>
                 <p>{shippingRates[shipping].label} · {shippingRates[shipping].eta}</p>
               </div>
               <Separator />
               <div>
-                <p className="eyebrow text-mute-text">Payment</p>
+                <div className="flex items-center justify-between">
+                  <p className="eyebrow text-mute-text">Payment</p>
+                  {editField("payment", "payment")}
+                </div>
                 <p>{paymentLabel()}</p>
               </div>
             </div>
@@ -445,12 +616,78 @@ export function CheckoutFlow() {
             ))}
           </ul>
           <Separator className="my-4" />
+
+          {/* Coupon */}
+          <div className="mb-4">
+            {appliedCoupon ? (
+              <div className="flex items-center justify-between gap-2 border border-dashed p-3 text-sm">
+                <div>
+                  <p className="font-medium">{appliedCoupon.code} applied</p>
+                  <p className="text-xs text-mute-text">
+                    You saved {formatINR(discount)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={removeCoupon}
+                  className="text-xs uppercase tracking-widest text-mute-text hover:text-foreground"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <>
+                <Label htmlFor="coupon" className="eyebrow text-mute-text">
+                  Coupon code
+                </Label>
+                <div className="mt-1 flex gap-2">
+                  <Input
+                    id="coupon"
+                    value={couponInput}
+                    onChange={(e) => {
+                      setCouponInput(e.target.value);
+                      if (couponError) setCouponError(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void applyCoupon();
+                      }
+                    }}
+                    placeholder="SAVE20"
+                    autoCapitalize="characters"
+                    autoComplete="off"
+                    className="uppercase"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={applyCoupon}
+                    loading={couponLoading}
+                    disabled={!couponInput.trim()}
+                  >
+                    Apply
+                  </Button>
+                </div>
+                {couponError && (
+                  <p className="mt-1 text-xs text-destructive">{couponError}</p>
+                )}
+              </>
+            )}
+          </div>
+
           <div className="space-y-1 text-sm">
             <div className="flex justify-between"><span>Subtotal</span><span>{formatINR(subtotal)}</span></div>
             <div className="flex justify-between">
               <span>Shipping</span>
               <span>{shippingCost === 0 ? "Free" : formatINR(shippingCost)}</span>
             </div>
+            {discount > 0 && (
+              <div className="flex justify-between text-destructive">
+                <span>Discount{appliedCoupon ? ` (${appliedCoupon.code})` : ""}</span>
+                <span>−{formatINR(discount)}</span>
+              </div>
+            )}
             <div className="flex justify-between border-t pt-2 font-medium">
               <span>Total</span><span>{formatINR(total)}</span>
             </div>

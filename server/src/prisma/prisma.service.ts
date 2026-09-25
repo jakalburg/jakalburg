@@ -15,7 +15,38 @@ export class PrismaService
   private readonly logger = new Logger(PrismaService.name);
 
   async onModuleInit() {
-    await this.$connect();
+    await this.connectWithRetry();
+  }
+
+  /**
+   * Connect with a few retries. Neon's free-tier compute auto-suspends when
+   * idle; the first connection after a suspend triggers a cold start that can
+   * take several seconds. Without this, a single cold start at boot throws
+   * P1001 and takes the whole Nest app down. Retrying with backoff lets the
+   * compute finish waking. (`connect_timeout` in DATABASE_URL widens the
+   * per-attempt window; this widens the number of attempts.)
+   */
+  private async connectWithRetry(retries = 5, delayMs = 1500): Promise<void> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        await this.$connect();
+        if (attempt > 1) {
+          this.logger.log(`Database connected on attempt ${attempt}.`);
+        }
+        return;
+      } catch (error) {
+        const isLast = attempt === retries;
+        const reason = (error as Error).message?.split('\n')[0];
+        this.logger.warn(
+          `DB connect attempt ${attempt}/${retries} failed` +
+            (isLast ? '' : `; retrying in ${delayMs}ms`) +
+            `: ${reason}`,
+        );
+        if (isLast) throw error;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        delayMs = Math.min(delayMs * 2, 8000);
+      }
+    }
   }
 
   /**

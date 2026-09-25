@@ -1,6 +1,7 @@
 import { AxiosInstance } from "axios";
 import API_ENDPOINTS from "@/config/endpoints";
 import { realApi } from "@/lib/api/real-axios";
+import { Paginated, toPaginated, type PaginationParams } from "@/types/pagination";
 
 // ---------------------------------------------------------------------------
 // Admin (staff) service — wired to the real NestJS backend (like products /
@@ -14,8 +15,16 @@ import { realApi } from "@/lib/api/real-axios";
 // ---------------------------------------------------------------------------
 
 export const adminService = (_api: AxiosInstance) => ({
-  async getAll() {
-    const response = await realApi.get(API_ENDPOINTS.admin.getAll);
+  // One page of administrators.
+  async getAll(params?: PaginationParams) {
+    const response = await realApi.get(API_ENDPOINTS.admin.getAll, { params });
+    return toPaginated<any>(response.data);
+  },
+
+  // A single administrator. The edit page used to pull the whole list and find
+  // its row in memory, which no longer works once the list is paginated.
+  async getById(id: string) {
+    const response = await realApi.get(API_ENDPOINTS.admin.getById(id));
     return response.data;
   },
 

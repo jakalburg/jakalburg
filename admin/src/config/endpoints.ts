@@ -70,6 +70,17 @@ const API_ENDPOINTS = {
     delete: (id: string) => `/brands/${id}`,
   },
 
+  // ==================== COUPONS (real backend) ====================
+  coupons: {
+    getAll: "/coupons",
+    create: "/coupons",
+    getById: (id: string) => `/coupons/${id}`,
+    usage: (id: string) => `/coupons/${id}/usage`,
+    update: (id: string) => `/coupons/${id}`,
+    delete: (id: string) => `/coupons/${id}`,
+    validate: "/coupons/validate",
+  },
+
   // ==================== COLLECTIONS ====================
   collections: {
     all: "/collections",
@@ -80,10 +91,16 @@ const API_ENDPOINTS = {
   },
 
   // ==================== REVIEWS ====================
+  // Real backend (NestJS ReviewsController). The `/admin` segment is what
+  // separates these moderation routes from the customer-facing ones on the
+  // storefront — all three are @AdminOnly.
   reviews: {
-    all: "/review",
-    update: (id: string) => `/review/${id}`,
-    delete: (id: string) => `/review/${id}`,
+    all: "/reviews/admin/all",
+    create: "/reviews/admin",
+    bulkCreate: "/reviews/admin/bulk",
+    setDisplay: "/reviews/admin/display",
+    updateStatus: (id: string) => `/reviews/admin/${id}`,
+    delete: (id: string) => `/reviews/admin/${id}`,
   },
 
   // ==================== MEDIA ====================
@@ -125,6 +142,15 @@ const API_ENDPOINTS = {
       update: (id: string) => `/website/home-sections/${id}`,
       seed: "/website/home-sections/seed",
     },
+  },
+
+  // ==================== CONTACT INBOX (real backend) ====================
+  // Storefront contact-form + newsletter submissions. `getAll` filters by type
+  // ("contact_us" | "newsletter"); status flip + delete are admin-only.
+  contact: {
+    getAll: "/contact",
+    updateStatus: (id: string) => `/contact/${id}/status`,
+    delete: (id: string) => `/contact/${id}`,
   },
 
   // ==================== SYSTEM LOGS ====================

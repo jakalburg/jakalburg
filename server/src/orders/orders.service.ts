@@ -7,11 +7,20 @@ import {
 import { Prisma, Order, OrderItem, OrderStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddressDto } from '../common/dto/address.dto';
+import { CouponsService } from '../coupons/coupons.service';
+import { EmailService, OrderEmailData } from '../email/email.service';
+import { SheetsService } from '../sheets/sheets.service';
 import {
   CreateOrderDto,
   OrderItemResponseDto,
   OrderResponseDto,
 } from './dto/order.dto';
+import {
+  PaginatedResult,
+  PaginationQuery,
+  paginate,
+  parsePagination,
+} from '../common/pagination';
 
 type OrderWithItems = Order & { items: OrderItem[] };
 
@@ -27,10 +36,12 @@ const ADMIN_INCLUDE = {
 
 type AdminOrder = Prisma.OrderGetPayload<{ include: typeof ADMIN_INCLUDE }>;
 
-// The lean store only persists these three states. The admin UI offers a richer
-// vocabulary (pending/confirmed/out_for_delivery/…); we fold each admin label
-// onto the nearest storable enum, and refuse the ones with no equivalent rather
-// than silently mis-storing them.
+// The admin UI offers a rich status vocabulary (pending/confirmed/
+// out_for_delivery/rejected/rto_received/…) that doesn't map 1:1 onto the lean
+// store's enum. Every admin label is folded onto the nearest storable state so
+// no status choice is rejected: the synonyms collapse (pending/confirmed →
+// processing, out_for_delivery → shipped, rejected → cancelled, rto_received →
+// returned) and the terminal states are stored as-is.
 const ADMIN_STATUS_TO_ENUM: Record<string, OrderStatus> = {
   pending: OrderStatus.processing,
   confirmed: OrderStatus.processing,
@@ -38,11 +49,23 @@ const ADMIN_STATUS_TO_ENUM: Record<string, OrderStatus> = {
   shipped: OrderStatus.shipped,
   out_for_delivery: OrderStatus.shipped,
   delivered: OrderStatus.delivered,
+  cancelled: OrderStatus.cancelled,
+  // "rejected" is how the admin labels a refused order — the same terminal state.
+  rejected: OrderStatus.cancelled,
+  returned: OrderStatus.returned,
+  // "return to origin received" is the courier-side end of a return.
+  rto_received: OrderStatus.returned,
+  refunded: OrderStatus.refunded,
 };
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly coupons: CouponsService,
+    private readonly email: EmailService,
+    private readonly sheets: SheetsService,
+  ) {}
 
   /** Create an order from the given lines. Prices/snapshots come from the LIVE
    *  products (never the client) so totals can't be tampered with. The user's
@@ -78,7 +101,12 @@ export class OrdersService {
 
     const subtotal = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
     const shipping = dto.shipping;
-    const discount = dto.discount ?? 0;
+    // The discount is ALWAYS recomputed server-side from the coupon (the
+    // client-sent `discount` is ignored) so totals can't be tampered with.
+    // An invalid/expired/under-minimum code throws 400 here.
+    const applied = await this.coupons.resolveForOrder(dto.couponCode, subtotal);
+    const discount = applied?.discount ?? 0;
+    const couponCode = applied?.couponCode ?? null;
     const total = Math.max(0, subtotal + shipping - discount);
 
     // Frozen snapshot of the shipping address (independent of later edits).
@@ -93,6 +121,7 @@ export class OrdersService {
             subtotal,
             shipping,
             discount,
+            couponCode,
             total,
             email: dto.email,
             paymentLabel: dto.paymentLabel,
@@ -101,6 +130,11 @@ export class OrdersService {
           },
           include: INCLUDE_ITEMS,
         });
+
+        // Count the redemption in the same transaction as the order.
+        if (applied) {
+          await this.coupons.recordRedemption(tx, applied.couponCode);
+        }
 
         // Emptied on checkout — the cart's job is done.
         const cart = await tx.cart.findUnique({ where: { userId } });
@@ -112,17 +146,46 @@ export class OrdersService {
       }),
     );
 
+    // Fire the confirmation (customer) + new-order (owner) emails, and mirror
+    // the order into the owner's Google Sheet. All three swallow their own
+    // failures and never throw, so flaky SMTP or a Google outage can't break
+    // checkout — the order is already committed either way. Awaited rather than
+    // left dangling because the serverless function can freeze the moment this
+    // response is returned, dropping any still-pending work.
+    const emailData = this.toOrderEmailData(order);
+    await Promise.all([
+      this.email.sendOrderPlacedCustomerEmail(emailData),
+      this.email.sendOrderPlacedOwnerEmail(emailData),
+      this.sheets.syncOrder(order),
+    ]).catch(() => undefined);
+
     return this.toResponse(order);
   }
 
-  /** The user's order history, newest first. */
-  async findMine(userId: string): Promise<OrderResponseDto[]> {
-    const orders = await this.prisma.order.findMany({
-      where: { userId },
-      include: INCLUDE_ITEMS,
-      orderBy: { createdAt: 'desc' },
-    });
-    return orders.map((o) => this.toResponse(o));
+  /** The user's order history, newest first, one page at a time. */
+  async findMine(
+    userId: string,
+    query: PaginationQuery = {},
+  ): Promise<PaginatedResult<OrderResponseDto>> {
+    const params = parsePagination(query);
+    const where: Prisma.OrderWhereInput = { userId };
+
+    const [total, orders] = await this.prisma.$transaction([
+      this.prisma.order.count({ where }),
+      this.prisma.order.findMany({
+        where,
+        include: INCLUDE_ITEMS,
+        orderBy: { createdAt: 'desc' },
+        skip: params.skip,
+        take: params.take,
+      }),
+    ]);
+
+    return paginate(
+      orders.map((o) => this.toResponse(o)),
+      total,
+      params,
+    );
   }
 
   /** A single order by its public number, scoped to the owner (404 otherwise so
@@ -163,15 +226,19 @@ export class OrdersService {
   // They are exposed through an UNGUARDED controller for local dev (see
   // OrdersAdminController). Add JwtAuthGuard + RolesGuard('admin') before deploy.
 
-  /** Every order, newest first, adapted to the admin table's shape. */
-  async adminFindAll(params: {
-    page?: number | string;
-    limit?: number | string;
-    status?: string;
-  }) {
-    const take = Math.min(Math.max(Number(params.limit) || 50, 1), 1000);
-    const page = Math.max(Number(params.page) || 1, 1);
-    const skip = (page - 1) * take;
+  /**
+   * One page of orders for the admin table, newest first (or by the requested
+   * sort), with search + status filtering done in the database.
+   */
+  async adminFindAll(
+    params: PaginationQuery & {
+      status?: string;
+      search?: string;
+      sort?: string;
+    },
+  ) {
+    // Default 10/page, hard-capped at 100 — the admin table used to pull 500.
+    const pagination = parsePagination(params);
 
     const where: Prisma.OrderWhereInput = {};
     const status = params.status?.toLowerCase();
@@ -179,24 +246,63 @@ export class OrdersService {
       where.status = ADMIN_STATUS_TO_ENUM[status];
     }
 
+    // Free-text over the order number, the customer's email and their name —
+    // the three columns the admin table actually shows.
+    const term = params.search?.trim();
+    if (term) {
+      where.OR = [
+        { orderNumber: { contains: term, mode: 'insensitive' } },
+        { email: { contains: term, mode: 'insensitive' } },
+        { user: { email: { contains: term, mode: 'insensitive' } } },
+        {
+          user: {
+            profiles: {
+              some: {
+                OR: [
+                  { firstName: { contains: term, mode: 'insensitive' } },
+                  { lastName: { contains: term, mode: 'insensitive' } },
+                ],
+              },
+            },
+          },
+        },
+      ];
+    }
+
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.order.findMany({
         where,
         include: ADMIN_INCLUDE,
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take,
+        orderBy: this.resolveAdminSort(params.sort),
+        skip: pagination.skip,
+        take: pagination.take,
       }),
       this.prisma.order.count({ where }),
     ]);
 
-    return {
-      items: rows.map((r) => this.toAdminRow(r)),
+    const page = paginate(
+      rows.map((r) => this.toAdminRow(r)),
       total,
-      skip,
-      take,
-      hasMore: skip + rows.length < total,
-    };
+      pagination,
+    );
+    // `items` is what the admin orders table has always read; `data` is the
+    // shared envelope's name. Both point at the same array.
+    return { ...page, items: page.data };
+  }
+
+  /** Sort orders by the keys the admin table offers. */
+  private resolveAdminSort(sort?: string): Prisma.OrderOrderByWithRelationInput {
+    switch (sort) {
+      case 'oldest':
+        return { createdAt: 'asc' };
+      case 'total-asc':
+        return { total: 'asc' };
+      case 'total-desc':
+        return { total: 'desc' };
+      case 'newest':
+      default:
+        return { createdAt: 'desc' };
+    }
   }
 
   /** One order (by internal id) with the fuller detail-page shape. */
@@ -204,16 +310,41 @@ export class OrdersService {
     return this.toAdminDetail(await this.getAdminOrderOr404(id));
   }
 
-  /** Set an order's status. `notifyCustomer` is accepted but not yet wired to
-   *  email (no order-status templates exist), so `emailSent` is always false. */
-  async adminUpdateStatus(id: string, rawStatus: string, _notify = false) {
+  /** Set an order's status. When `notify` is set and the status actually
+   *  changed, email the customer a status-update notice (`emailSent` reflects
+   *  whether that send succeeded). A no-op change never emails. */
+  async adminUpdateStatus(id: string, rawStatus: string, notify = false) {
     const order = await this.getAdminOrderOr404(id);
-    const mapped = this.mapAdminStatus(rawStatus);
-    const statusChanged = order.status !== mapped;
-    if (statusChanged) {
-      await this.prisma.order.update({ where: { id }, data: { status: mapped } });
+    const key = String(rawStatus || '').toLowerCase();
+    const mapped = this.mapAdminStatus(rawStatus); // validates; throws on unknown
+
+    // "Changed" is judged on the GRANULAR label the admin picks, not the lean
+    // enum — otherwise switching shipped → out_for_delivery (both stored as
+    // `shipped`) would read as a no-op and the choice would never stick.
+    const previousLabel = order.adminStatus ?? order.status;
+    const statusChanged = previousLabel !== key;
+    // The customer email only makes sense when the customer-facing enum moves;
+    // a purely granular change (e.g. shipped → out_for_delivery) shouldn't re-mail.
+    const enumChanged = order.status !== mapped;
+
+    if (statusChanged || enumChanged) {
+      await this.prisma.order.update({
+        where: { id },
+        data: { status: mapped, adminStatus: key },
+      });
+      // Push the new status (and the Dispatched checkbox that follows from it)
+      // to the sheet. Only on a real change — a no-op re-save shouldn't churn
+      // the row or reset its sync state.
+      await this.sheets.syncOrderById(id);
     }
-    return { success: true, statusChanged, emailSent: false };
+    let emailSent = false;
+    if (notify && enumChanged) {
+      emailSent = await this.email.sendOrderStatusUpdateEmail(
+        this.toOrderEmailData(order),
+        mapped,
+      );
+    }
+    return { success: true, statusChanged, emailSent };
   }
 
   /** Accept an order (→ processing). */
@@ -221,19 +352,24 @@ export class OrdersService {
     await this.getAdminOrderOr404(id);
     await this.prisma.order.update({
       where: { id },
-      data: { status: OrderStatus.processing },
+      // Keep the granular label in step so the badge reads "Confirmed", not the
+      // collapsed "Processing".
+      data: { status: OrderStatus.processing, adminStatus: 'confirmed' },
     });
+    await this.sheets.syncOrderById(id);
     return { success: true };
   }
 
-  /** Reject — the lean store has no cancelled/rejected state, so this is refused
-   *  rather than silently mis-stored. (In practice the UI only offers reject for
-   *  pending COD orders, which this store never produces.) */
+  /** Reject an order → the terminal `cancelled` state (rejected and cancelled are
+   *  the same outcome in this store). The reason isn't persisted (no column). */
   async adminReject(id: string, _reason?: string) {
     await this.getAdminOrderOr404(id);
-    throw new BadRequestException(
-      'Rejecting orders is not supported in this store yet.',
-    );
+    await this.prisma.order.update({
+      where: { id },
+      data: { status: OrderStatus.cancelled, adminStatus: 'rejected' },
+    });
+    await this.sheets.syncOrderById(id);
+    return { success: true };
   }
 
   /** Mark an order shipped. Tracking/courier details can't be persisted (no
@@ -242,16 +378,51 @@ export class OrdersService {
     await this.getAdminOrderOr404(id);
     await this.prisma.order.update({
       where: { id },
-      data: { status: OrderStatus.shipped },
+      data: { status: OrderStatus.shipped, adminStatus: 'shipped' },
     });
+    await this.sheets.syncOrderById(id);
     return { success: true };
   }
 
-  /** Permanently delete an order (its items cascade). */
-  async adminRemove(id: string): Promise<{ success: boolean; id: string }> {
+  /** Permanently delete an order (its items cascade). The sheet row goes with
+   *  it unless `removeFromSheet` is explicitly false — the admin's delete
+   *  dialog offers that as a checkbox, for keeping a paper trail of an order
+   *  that no longer exists in the database.
+   *
+   *  The row is removed BEFORE the order, while the id is still resolvable; a
+   *  failure there is reported back (`sheetRemovalError`) but never blocks the
+   *  delete, so an order can always be removed even when Sheets is unreachable. */
+  async adminRemove(
+    id: string,
+    removeFromSheet = true,
+  ): Promise<{
+    success: boolean;
+    id: string;
+    sheetRemoved: boolean;
+    sheetRemovalError?: string;
+  }> {
     await this.getAdminOrderOr404(id);
+
+    let sheetRemoved = false;
+    let sheetRemovalError: string | undefined;
+
+    if (removeFromSheet && this.sheets.isConfigured) {
+      const result = await this.sheets.removeOrder(id);
+      sheetRemoved = result.success;
+      if (!result.success) sheetRemovalError = result.message;
+    }
+
     await this.prisma.order.delete({ where: { id } });
-    return { success: true, id };
+
+    return { success: true, id, sheetRemoved, sheetRemovalError };
+  }
+
+  /** Manually (re-)sync one order to the sheet — the admin's "Add to Sheet"
+   *  button. Returns the attempt's outcome rather than throwing, so a failure
+   *  renders as a message on the page instead of a 500. */
+  async adminSyncSheet(id: string) {
+    await this.getAdminOrderOr404(id);
+    return this.sheets.syncOrderById(id);
   }
 
   // ---- admin helpers --------------------------------------------------------
@@ -274,7 +445,7 @@ export class OrdersService {
     const mapped = ADMIN_STATUS_TO_ENUM[key];
     if (!mapped) {
       throw new BadRequestException(
-        `Status "${rawStatus}" is not supported by this store (allowed: processing, shipped, delivered).`,
+        `Status "${rawStatus}" is not supported by this store (allowed: processing, shipped, delivered, cancelled, returned, refunded).`,
       );
     }
     return mapped;
@@ -338,6 +509,9 @@ export class OrdersService {
       invoiceNumber: null as string | null,
       invoiceSequence: null as number | null,
       status: order.status,
+      // The exact admin label last set (out_for_delivery / rejected / …), or null
+      // to fall back to `status`. The dashboard shows and re-selects this.
+      adminStatus: order.adminStatus ?? null,
       totalAmount: order.total,
       paymentMethod: order.paymentLabel,
       createdAt: order.createdAt.toISOString(),
@@ -361,7 +535,7 @@ export class OrdersService {
       subtotal: order.subtotal,
       shippingCost: order.shipping,
       discountAmount: order.discount,
-      couponCode: null,
+      couponCode: order.couponCode,
       orderNote: null,
       rejectionReason: null,
       // Payment breakdown inputs (computeInvoiceBreakdown reads these).
@@ -376,10 +550,42 @@ export class OrdersService {
       courierName: null,
       estimatedDelivery: null,
       deliveryStatus: null,
-      // Google Sheets sync card (feature not configured for this store).
-      sheetSyncStatus: 'pending',
-      sheetSyncedAt: null,
-      sheetSyncError: null,
+      // Google Sheets sync card. Orders placed before the sync existed have no
+      // stored state at all — they read as "pending" (never attempted), which
+      // is exactly what they are, and the page's "Add to Sheet" button fixes.
+      sheetSyncStatus: order.sheetSyncStatus ?? 'pending',
+      sheetSyncedAt: order.sheetSyncedAt?.toISOString() ?? null,
+      sheetSyncError: order.sheetSyncError ?? null,
+    };
+  }
+
+  /** Shape an order (with items) for the email templates. Reads the customer's
+   *  name from the frozen shipping snapshot; `AdminOrder` is assignable here
+   *  since it extends `OrderWithItems`. */
+  private toOrderEmailData(order: OrderWithItems): OrderEmailData {
+    const addr = (order.shippingAddress ?? {}) as Record<string, unknown>;
+    const fullName = typeof addr.fullName === 'string' ? addr.fullName : '';
+    return {
+      orderNumber: order.orderNumber,
+      orderId: order.id,
+      customerName: fullName || 'there',
+      customerEmail: order.email,
+      createdAt: order.createdAt.toISOString(),
+      paymentLabel: order.paymentLabel,
+      subtotal: order.subtotal,
+      shipping: order.shipping,
+      discount: order.discount,
+      couponCode: order.couponCode,
+      total: order.total,
+      items: order.items.map((i) => ({
+        name: i.title,
+        image: i.image,
+        size: i.size,
+        color: i.color,
+        quantity: i.quantity,
+        unitPrice: i.price,
+        lineTotal: i.price * i.quantity,
+      })),
     };
   }
 
@@ -400,6 +606,7 @@ export class OrdersService {
       subtotal: order.subtotal,
       shipping: order.shipping,
       discount: order.discount,
+      couponCode: order.couponCode,
       total: order.total,
       status: order.status,
       address: order.shippingAddress as unknown as AddressDto,

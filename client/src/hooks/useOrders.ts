@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api-client";
 import { API_ENDPOINTS } from "@/lib/api-endpoints";
+import {
+  ORDER_PAGE_SIZE,
+  toPaginated,
+  toQueryString,
+  type Paginated,
+} from "@/lib/pagination";
 import { useAppSelector } from "@/redux/hooks";
 import { selectIsAuthenticated } from "@/redux/features/auth-slice";
 import type { Address, MockOrder } from "@/types";
@@ -17,24 +23,35 @@ export interface CreateOrderInput {
   items: { productId: string; size: string; color: string; quantity: number }[];
   shipping: number;
   discount?: number;
+  /** Coupon code to apply. The server validates it and recomputes the discount. */
+  couponCode?: string;
   address: Address;
   email: string;
   paymentLabel: string;
 }
 
-// The signed-in user's full order history (most recent first). Only runs when
-// authenticated — orders are always account-scoped.
-export function useOrders() {
+// One page of the signed-in user's order history (most recent first). Only
+// runs when authenticated — orders are always account-scoped.
+export function useOrders({
+  page = 1,
+  limit = ORDER_PAGE_SIZE,
+}: { page?: number; limit?: number } = {}) {
   const isAuth = useAppSelector(selectIsAuthenticated);
   return useQuery({
-    queryKey: ordersKey,
-    queryFn: () => apiFetch<MockOrder[]>(E.mine, { auth: true }),
+    queryKey: [...ordersKey, page, limit],
+    queryFn: () =>
+      apiFetch<Paginated<MockOrder> | MockOrder[]>(
+        `${E.mine}${toQueryString({ page, limit })}`,
+        { auth: true },
+      ).then((raw) => toPaginated<MockOrder>(raw, limit)),
     enabled: isAuth,
     // Orders change out-of-band (a checkout in another view places one), and the
     // global default is refetchOnMount:false with a long staleTime — meant for
     // the catalogue, not this list. Always refetch on mount so a just-placed
     // order shows the moment you open "My orders".
     refetchOnMount: "always",
+    // Keep the current page visible while the next one loads.
+    placeholderData: (previous) => previous,
   });
 }
 

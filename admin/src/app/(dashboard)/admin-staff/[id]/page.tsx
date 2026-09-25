@@ -58,8 +58,9 @@ export default function EditAdminPage({
   useEffect(() => {
     const fetchAdmin = async () => {
       try {
-        const admins = await adminService(axiosAuth).getAll();
-        const admin = admins.find((a: any) => a.id === resolvedParams.id);
+        // Fetch just this admin — the list is paginated, so scanning it for
+        // one row would only ever see the first page.
+        const admin = await adminService(axiosAuth).getById(resolvedParams.id);
 
         if (admin) {
           form.reset({

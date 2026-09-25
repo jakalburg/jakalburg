@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import useAxiosAuth from "./use-axios-auth";
+import { realApi } from "@/lib/api/real-axios";
 import { toast } from "sonner";
 
 export interface WebsiteAboutData {
@@ -19,6 +20,12 @@ export interface WebsiteAboutData {
 
 export interface WebsiteContactData {
   id?: string;
+  // Global store contact details (shown on the storefront /contact page).
+  email?: string;
+  phone?: string;
+  address?: string;
+  /** Google Maps URL — optional; the storefront links the address to it when set. */
+  mapLink?: string;
   contactImage?: string;
   subtitle?: string;
   title?: string;
@@ -62,14 +69,14 @@ export function useUpdateAbout() {
   });
 }
 
+// Contact page content is wired to the REAL backend (server WebsiteContact
+// singleton). GET is public; PATCH is admin-only — realApi attaches the admin JWT.
 export function useGetContact(options?: { enabled?: boolean }) {
-  const axiosAuth = useAxiosAuth();
-
   return useQuery({
     queryKey: ["website-contact"],
     queryFn: async () => {
       const { data } =
-        await axiosAuth.get<WebsiteContactData>("/website/contact");
+        await realApi.get<WebsiteContactData>("/website/contact");
       return data;
     },
     enabled: options?.enabled,
@@ -77,12 +84,11 @@ export function useGetContact(options?: { enabled?: boolean }) {
 }
 
 export function useUpdateContact() {
-  const axiosAuth = useAxiosAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (data: Partial<WebsiteContactData>) => {
-      const res = await axiosAuth.patch("/website/contact", data);
+      const res = await realApi.patch("/website/contact", data);
       return res.data;
     },
     onSuccess: () => {

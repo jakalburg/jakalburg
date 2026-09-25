@@ -30,6 +30,11 @@ import {
 import { adminService } from "@/services/admin.service";
 import Loader from "@/components/ui/loader";
 import useAxiosAuth from "@/hooks/use-axios-auth";
+import { useDebounce } from "@/hooks/use-debounce";
+import {
+  TablePagination,
+  TABLE_PAGE_SIZE,
+} from "@/components/admin/table-pagination";
 
 export default function AdminStaffPage() {
   const router = useRouter();
@@ -37,11 +42,23 @@ export default function AdminStaffPage() {
   const [admins, setAdmins] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const debouncedSearch = useDebounce(search, 300);
 
+  // Search and paging both happen server-side; `admins` holds one page.
   const fetchAdmins = async () => {
+    setLoading(true);
     try {
-      const data = await adminService(axiosAuth).getAll();
-      setAdmins(data);
+      const result = await adminService(axiosAuth).getAll({
+        page,
+        limit: TABLE_PAGE_SIZE,
+        search: debouncedSearch.trim() || undefined,
+      });
+      setAdmins(result.data);
+      setTotal(result.total);
+      setTotalPages(result.totalPages);
     } catch (error) {
       toast.error("Failed to fetch admins");
     } finally {
@@ -51,7 +68,13 @@ export default function AdminStaffPage() {
 
   useEffect(() => {
     fetchAdmins();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, debouncedSearch]);
+
+  // A new search term invalidates the page the admin was on.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
 
   const handleDelete = async (id: string) => {
     try {
@@ -63,14 +86,8 @@ export default function AdminStaffPage() {
     }
   };
 
-  const filteredAdmins = admins.filter(
-    (admin) =>
-      admin.email.toLowerCase().includes(search.toLowerCase()) ||
-      admin.profiles[0]?.firstName
-        ?.toLowerCase()
-        .includes(search.toLowerCase()) ||
-      admin.profiles[0]?.lastName?.toLowerCase().includes(search.toLowerCase()),
-  );
+  // Already filtered by the server.
+  const filteredAdmins = admins;
 
   if (loading) return <Loader />;
 
@@ -165,6 +182,14 @@ export default function AdminStaffPage() {
           </TableBody>
         </Table>
       </div>
+
+      <TablePagination
+        currentPage={page}
+        totalPages={totalPages}
+        total={total}
+        onPageChange={setPage}
+        itemLabel="admins"
+      />
     </div>
   );
 }

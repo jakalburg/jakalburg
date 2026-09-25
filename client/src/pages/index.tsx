@@ -4,7 +4,7 @@ import { SiteLayout } from "@/components/layout/SiteLayout";
 import { ProductGrid } from "@/components/product/ProductGrid";
 import { Button } from "@/components/ui/button";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
-import { useProducts } from "@/hooks/useProducts";
+import { useProductsPage } from "@/hooks/useProducts";
 import { useHeroSlides, type HeroConfig } from "@/hooks/useHeroSlides";
 import {
   useCollections,
@@ -16,6 +16,9 @@ import { HeroCarousel } from "@/components/home/HeroCarousel";
 import { heroImages } from "@/data/images";
 import { apiFetch } from "@/lib/api-client";
 import { API_ENDPOINTS } from "@/lib/api-endpoints";
+
+/** Products shown in each curated row on the home page. */
+const HOME_ROW_SIZE = 4;
 
 // Fetch the hero config at build/revalidation so the very first paint already
 // knows `fullBleed` — without this, a full-bleed hero briefly renders the split
@@ -44,7 +47,14 @@ export default function HomePage({
   initialHeroConfig: HeroConfig | null;
   initialCollections: ApiCollection[] | null;
 }) {
-  const { data: products = [], isLoading } = useProducts();
+  // Two curated rows of 4 — each asks the API for exactly those 4 rather than
+  // pulling the catalogue down to slice it.
+  const { data: newInPage, isLoading: newInLoading } = useProductsPage({
+    isNew: true,
+    limit: HOME_ROW_SIZE,
+  });
+  const { data: essentialsPage, isLoading: essentialsLoading } =
+    useProductsPage({ essential: true, limit: HOME_ROW_SIZE });
   const { data: heroConfig } = useHeroSlides(initialHeroConfig ?? undefined);
   const { data: collectionsData } = useCollections(
     initialCollections ?? undefined,
@@ -52,8 +62,8 @@ export default function HomePage({
   const moodCollections = resolveCollections(collectionsData).slice(0, 3);
   const heroSlides = heroConfig?.slides ?? [];
   const heroFullBleed = heroConfig?.fullBleed ?? false;
-  const newIn = products.filter((p) => p.isNew).slice(0, 4);
-  const essentials = products.filter((p) => p.essential).slice(0, 4);
+  const newIn = newInPage?.data ?? [];
+  const essentials = essentialsPage?.data ?? [];
 
   return (
     <>
@@ -111,7 +121,7 @@ export default function HomePage({
             </div>
             <Link href="/new-arrivals" className="text-sm underline underline-offset-4">See all</Link>
           </div>
-          <ProductGrid products={newIn} isLoading={isLoading} skeletonCount={4} />
+          <ProductGrid products={newIn} isLoading={newInLoading} skeletonCount={HOME_ROW_SIZE} />
         </section>
 
         <section className="container-vh py-16">
@@ -169,7 +179,7 @@ export default function HomePage({
             </div>
             <Link href="/essentials" className="text-sm underline underline-offset-4">Shop all</Link>
           </div>
-          <ProductGrid products={essentials} isLoading={isLoading} skeletonCount={4} />
+          <ProductGrid products={essentials} isLoading={essentialsLoading} skeletonCount={HOME_ROW_SIZE} />
         </section>
       </SiteLayout>
     </>

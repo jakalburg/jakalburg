@@ -86,7 +86,6 @@ export const navItems: NavItem[] = [
     icon: Mail,
     subItems: [
       { href: "/contact/contact-us", label: "Contact Us", icon: Mail },
-      { href: "/contact/get-in-touch", label: "Get In Touch", icon: Mail },
       { href: "/contact/newsletter", label: "Newsletter", icon: Users2 },
     ],
   },

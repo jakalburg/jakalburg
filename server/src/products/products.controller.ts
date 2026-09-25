@@ -20,6 +20,8 @@ import { ProductQueryDto } from './dto/product-query.dto';
 import {
   AdminProductListResponseDto,
   AdminProductResponseDto,
+  ProductFacetsResponseDto,
+  ProductListResponseDto,
   ProductResponseDto,
 } from './dto/product-response.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -51,14 +53,20 @@ export class ProductsController {
   adminList(
     @Query('skip') skip?: string,
     @Query('take') take?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
     @Query('category') category?: string,
     @Query('sort') sort?: string,
   ): Promise<AdminProductListResponseDto> {
+    // Raw strings are handed straight to parsePagination, which clamps and
+    // normalises them (page ≥ 1, 1 ≤ limit ≤ 100) rather than trusting Number().
     return this.productsService.adminList({
-      skip: skip !== undefined ? Number(skip) : undefined,
-      take: take !== undefined ? Number(take) : undefined,
+      skip,
+      take,
+      page,
+      limit,
       status,
       search,
       category,
@@ -75,10 +83,20 @@ export class ProductsController {
     @Query('query') query = '',
     @Query('skip') skip?: string,
     @Query('take') take?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('category') category?: string,
+    @Query('sort') sort?: string,
   ): Promise<AdminProductListResponseDto> {
     return this.productsService.adminSearch(query, {
-      skip: skip !== undefined ? Number(skip) : undefined,
-      take: take !== undefined ? Number(take) : undefined,
+      skip,
+      take,
+      page,
+      limit,
+      status,
+      category,
+      sort,
     });
   }
 
@@ -96,17 +114,17 @@ export class ProductsController {
   // Public storefront (read)
   // ===========================================================================
 
-  /** List / filter products (public). */
+  /** List / filter products (public, paginated). */
   @Get()
   @ApiOperation({
-    summary: 'List products',
+    summary: 'List products (paginated)',
     description:
-      'Returns products with optional filters (gender, category, collection, ' +
-      'isNew, onSale, essential, search) and sort. With no query params it ' +
-      'returns the full catalogue.',
+      'Returns one page of products with optional filters (gender, category, ' +
+      'collection, isNew, onSale, essential, size, color, ids, search) and ' +
+      'sort. Defaults to page 1 × 10 rows; `limit` is capped at 100.',
   })
-  @ApiOkResponse({ description: 'Matching products.', type: [ProductResponseDto] })
-  findAll(@Query() query: ProductQueryDto): Promise<ProductResponseDto[]> {
+  @ApiOkResponse({ description: 'Matching products.', type: ProductListResponseDto })
+  findAll(@Query() query: ProductQueryDto): Promise<ProductListResponseDto> {
     return this.productsService.findAll(query);
   }
 
@@ -119,6 +137,18 @@ export class ProductsController {
   @ApiOkResponse({ description: 'Distinct category slugs.', type: [String] })
   listCategories(): Promise<string[]> {
     return this.productsService.listCategories();
+  }
+
+  /**
+   * Distinct sizes + colours across everything matching the given filters.
+   * The storefront's filter chips read this, since a paginated list no longer
+   * holds the whole matching set client-side.
+   */
+  @Get('meta/facets')
+  @ApiOperation({ summary: 'Distinct sizes + colours for a filtered slice' })
+  @ApiOkResponse({ description: 'Available filter values.', type: ProductFacetsResponseDto })
+  listFacets(@Query() query: ProductQueryDto): Promise<ProductFacetsResponseDto> {
+    return this.productsService.listFacets(query);
   }
 
   /** Related products for a slug (public). */

@@ -1,0 +1,30 @@
+// Discount coupons managed from the admin and redeemed at checkout. Monetary
+// fields are whole rupees (INR), like Product.price. A coupon's `discountAmount`
+// is read against `discountType`: a percentage (0–100) or a flat INR amount.
+// Validation (active, not expired, minimum spend, usage cap) and the actual
+// discount are always computed server-side — the client only ever sends a code.
+enum CouponDiscountType {
+  percentage
+  fixed
+}
+
+model Coupon {
+  id             String             @id @default(cuid())
+  code           String             @unique // normalized to UPPERCASE
+  title          String?
+  discountType   CouponDiscountType @default(percentage)
+  discountAmount Int                @default(0) // percent (0–100) when percentage; whole INR when fixed
+  minimumAmount  Int                @default(0) // minimum cart subtotal (INR) required to apply
+  productType    String             @default("all") // informational label only; NOT enforced at checkout
+  endDate        DateTime? // expiry; null = never expires
+  isActive       Boolean            @default(true)
+  maxUsage       Int? // total redemptions allowed; null = unlimited
+  usageCount     Int                @default(0)
+  logo           String? // optional Cloudinary image
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([code])
+  // Admin coupon table pages newest-first.
+  @@index([createdAt])
+}

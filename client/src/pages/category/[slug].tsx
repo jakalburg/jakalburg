@@ -3,7 +3,6 @@ import SEO from "@/components/seo";
 import { SiteLayout } from "@/components/layout/SiteLayout";
 import { CollectionView } from "@/components/collection/CollectionView";
 import { allCategories, findCategory, type Category } from "@/data/categories";
-import { useProducts } from "@/hooks/useProducts";
 
 export const getStaticPaths: GetStaticPaths = () => ({
   paths: allCategories.map((c) => ({ params: { slug: c.slug } })),
@@ -17,10 +16,6 @@ export const getStaticProps: GetStaticProps<{ category: Category }> = ({ params 
 };
 
 export default function CategoryPage({ category }: { category: Category }) {
-  const { data: products = [], isLoading } = useProducts();
-  const list = products.filter(
-    (p) => p.category === category.category && (category.gender === "all" || p.gender === category.gender),
-  );
   const label = `${category.title} — ${category.gender === "women" ? "Women" : "Men"}`;
   return (
     <>
@@ -33,8 +28,11 @@ export default function CategoryPage({ category }: { category: Category }) {
         <CollectionView
           eyebrow={category.gender === "women" ? "Women" : "Men"}
           title={category.title}
-          products={list}
-          isLoading={isLoading}
+          filters={{
+            category: category.category,
+            // "all" means both genders — leave the filter off entirely.
+            gender: category.gender === "all" ? undefined : category.gender,
+          }}
         />
       </SiteLayout>
     </>

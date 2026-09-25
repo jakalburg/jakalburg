@@ -1,13 +1,54 @@
 "use client";
 
 import Link from "next/link";
-import { Plus, Trash2, Calendar, Tag as TagIcon } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Calendar,
+  Tag as TagIcon,
+  Copy,
+  Check,
+} from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/admin/data-table";
 import { useCoupons, useDeleteCoupon } from "@/hooks/use-coupons";
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+
+/** Copy a coupon code to the clipboard, with a brief check-mark confirmation. */
+function CopyCodeButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Couldn't copy the code");
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="h-6 w-6 text-muted-foreground hover:text-foreground"
+      onClick={copy}
+      title="Copy code"
+      aria-label={`Copy coupon code ${code}`}
+    >
+      {copied ? (
+        <Check className="w-3.5 h-3.5 text-green-600" />
+      ) : (
+        <Copy className="w-3.5 h-3.5" />
+      )}
+    </Button>
+  );
+}
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,11 +60,22 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  TablePagination,
+  TABLE_PAGE_SIZE,
+} from "@/components/admin/table-pagination";
 
 export function CouponsTab() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const { data: coupons = [], isLoading, error } = useCoupons();
+  const [page, setPage] = useState(1);
+  const { data, isLoading, error } = useCoupons({
+    page,
+    limit: TABLE_PAGE_SIZE,
+  });
+  const coupons = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
   const deleteMutation = useDeleteCoupon();
 
   const handleDelete = async (id: string) => {
@@ -50,6 +102,7 @@ export function CouponsTab() {
         <div className="flex items-center gap-2">
           <TagIcon className="w-4 h-4 text-muted-foreground" />
           <span className="font-mono font-semibold">{coupon.couponCode}</span>
+          <CopyCodeButton code={coupon.couponCode} />
         </div>
       ),
     },
@@ -168,6 +221,15 @@ export function CouponsTab() {
           getRowKey={(coupon) => coupon.id}
         />
       </div>
+      {!isLoading && !error && (
+        <TablePagination
+          currentPage={page}
+          totalPages={totalPages}
+          total={total}
+          onPageChange={setPage}
+          itemLabel="coupons"
+        />
+      )}
 
       {/* Mobile Card View */}
       <div className="grid grid-cols-1 gap-3 md:hidden">
@@ -200,6 +262,7 @@ export function CouponsTab() {
                     <span className="font-mono font-semibold text-sm">
                       {coupon.couponCode}
                     </span>
+                    <CopyCodeButton code={coupon.couponCode} />
                   </div>
                   <div className="flex items-center gap-2">
                     {coupon.discountType === "percentage" ? (

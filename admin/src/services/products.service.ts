@@ -1,6 +1,7 @@
 import { AxiosInstance } from "axios";
 import API_ENDPOINTS from "../config/endpoints";
 import { realApi } from "@/lib/api/real-axios";
+import { Paginated, toPaginated } from "@/types/pagination";
 
 // ---------------------------------------------------------------------------
 // Products service — the FIRST entity wired to the real NestJS backend.
@@ -19,11 +20,19 @@ import { realApi } from "@/lib/api/real-axios";
 // lean DTO below, so create/update are essentially pass-through.
 // ---------------------------------------------------------------------------
 
-/** One colour option (matches the server's ProductColor: name + CSS hex). */
+/** One colour option (matches the server's ProductColor). Beyond name + hex a
+ *  colour may carry its own images/sizes/price/etc.; anything omitted or left
+ *  empty inherits the product-level default at render time. */
 export interface ProductColorInput {
   name: string;
   hex: string;
   position?: number;
+  images?: string[];
+  sizes?: string[];
+  soldOutSizes?: string[];
+  price?: number;
+  compareAtPrice?: number;
+  stock?: number;
 }
 
 /** Lean create payload — mirrors server CreateProductDto 1:1. */
@@ -49,6 +58,8 @@ export interface CreateProductDto {
   care: string;
   stock?: number;
   isActive?: boolean;
+  /** When true, the storefront hides this product's reviews + rating. */
+  reviewsHidden?: boolean;
   colors?: ProductColorInput[];
 }
 
@@ -89,6 +100,7 @@ interface LeanProduct {
   care?: string;
   stock?: number;
   isActive?: boolean;
+  reviewsHidden?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -137,16 +149,18 @@ function toAdminProduct(p: LeanProduct): any {
   };
 }
 
-/** Server list envelope → same envelope with mapped items. */
-function mapListEnvelope(raw: any) {
-  const data = Array.isArray(raw?.data) ? raw.data : [];
-  return {
-    data: data.map((p: LeanProduct) => toAdminProduct(p)),
-    total: raw?.total ?? data.length,
-    skip: raw?.skip ?? 0,
-    take: raw?.take ?? data.length,
-    hasMore: raw?.hasMore ?? false,
-  };
+/**
+ * Server list envelope → the same envelope with its items mapped.
+ *
+ * The WHOLE envelope is carried through, not just `data`/`total`/`hasMore`.
+ * `page` matters in particular: scroll-loaded pickers derive the next batch
+ * from it, and while it was being dropped here they computed page 2 forever
+ * and appended the same rows on every scroll. `totalPages` saves each table
+ * from recomputing it from `total`.
+ */
+function mapListEnvelope(raw: any): Paginated<any> {
+  const page = toPaginated<LeanProduct>(raw);
+  return { ...page, data: page.data.map((p) => toAdminProduct(p)) };
 }
 
 /**
@@ -163,11 +177,13 @@ export const productsService = (_api: AxiosInstance) => ({
     category?: string;
     status?: "all" | "active" | "disabled";
     isStealDeal?: boolean; // ignored (not in the lean model)
-  }) {
+  }): Promise<Paginated<any>> {
     // Steal-deal bundles don't exist in the lean catalogue — return empty so the
     // steal-deals screen shows a clean "none" state instead of the full catalogue.
+    // Shaped like a real empty page so callers can read `page`/`totalPages`
+    // without special-casing this branch.
     if (params?.isStealDeal) {
-      return { data: [], total: 0, skip: 0, take: params?.limit ?? 10, hasMore: false };
+      return toPaginated<any>({ data: [] }, params?.limit ?? 10);
     }
 
     const limit = params?.limit ?? 10;
@@ -202,10 +218,10 @@ export const productsService = (_api: AxiosInstance) => ({
   },
 
   // Free-text search — returns { data } of mapped products.
-  async search(query: string) {
+  async search(query: string, limit = 10) {
     if (!query) return { data: [] };
     const response = await realApi.get(API_ENDPOINTS.products.search, {
-      params: { query },
+      params: { query, limit },
     });
     return { data: mapListEnvelope(response.data).data };
   },

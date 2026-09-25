@@ -14,11 +14,13 @@ import { realApi } from "@/lib/api/real-axios";
 
 export const ordersService = (_api: AxiosInstance) => ({
   // Paged list. Server already returns the admin table shape
-  // ({items,total,skip,take,hasMore}); no client-side remap needed.
+  // ({data,items,total,skip,take,page,limit,totalPages,hasMore}); no
+  // client-side remap needed. Search/status/sort are all applied in SQL.
   async getAll(params?: {
     page?: number;
     limit?: number;
     status?: string;
+    search?: string;
     sort?: string;
   }) {
     const response = await realApi.get("/admin/orders", { params });
@@ -87,20 +89,22 @@ export const ordersService = (_api: AxiosInstance) => ({
     return response.data;
   },
 
-  // Permanently delete an order. (removeFromSheet is a no-op — no Sheets here.)
-  async delete(id: string, _removeFromSheet?: boolean) {
-    const response = await realApi.delete(`/admin/orders/${id}`);
+  // Permanently delete an order. By default its Google Sheet row goes too;
+  // pass false to leave the row behind as a paper trail. The response carries
+  // {sheetRemoved, sheetRemovalError} so the UI can warn when the order was
+  // deleted but its row couldn't be.
+  async delete(id: string, removeFromSheet = true) {
+    const response = await realApi.delete(`/admin/orders/${id}`, {
+      params: { removeFromSheet },
+    });
     return response.data;
   },
 
-  // Google Sheets isn't configured for this store — resolve as a friendly skip
-  // so the "Add to Sheet" buttons don't error.
-  async syncSheet(_id: string) {
-    return {
-      success: true,
-      skipped: true,
-      message: "Google Sheets sync isn't configured for this store.",
-    };
+  // (Re-)send one order to the Google Sheet. Resolves with {success, skipped,
+  // message} — `skipped` when the store has no Sheets webhook configured.
+  async syncSheet(id: string) {
+    const response = await realApi.post(`/admin/orders/${id}/sync-sheet`);
+    return response.data;
   },
 
   // Offline/manual orders require a customer account + product mapping the lean

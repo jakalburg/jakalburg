@@ -1,11 +1,21 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, type UseFormReturn } from "react-hook-form";
 import * as z from "zod";
-import { Loader2, Plus, Trash2, ImageOff, Info, Upload } from "lucide-react";
+import {
+  Loader2,
+  Plus,
+  ImageOff,
+  Info,
+  Upload,
+  X,
+  Star,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -49,7 +59,15 @@ import {
 } from "@/services/collections.service";
 import { uploadProductImages } from "@/services/uploads.service";
 import { useFabrics } from "@/hooks/use-fabrics";
+import {
+  ColorVariantCard,
+  type ColorVariant,
+  type ImageItem,
+} from "@/components/products/color-variant-card";
 import { cn } from "@/lib/utils";
+
+/** Server-side maximum page size — used where a picker renders every option. */
+const PICKER_LIMIT = 100;
 
 // ---------------------------------------------------------------------------
 // Lean product form — writes to the real NestJS backend (via productsService,
@@ -58,9 +76,10 @@ import { cn } from "@/lib/utils";
 // images (URLs), sizes, colours, flags, etc. There is no SKU / brand / media
 // upload here — the storefront doesn't have those concepts.
 //
-// Images: the lean server stores `images: string[]`. The admin can either
-// upload local files (sent to POST /uploads/images, which stores them in
-// Cloudinary and returns URLs) or paste already-hosted URLs. Either way the
+// Images: the lean server stores `images: string[]`. Locally-picked files are
+// held in memory (with an object-URL preview) and only sent to POST
+// /uploads/images — which stores them in Cloudinary and returns URLs — when the
+// admin saves. Existing products' hosted URLs are kept as-is. Either way the
 // resulting URL strings are what get saved on the product.
 // ---------------------------------------------------------------------------
 
@@ -106,6 +125,9 @@ const productFormSchema = z
     onSale: z.boolean(),
     essential: z.boolean(),
     isActive: z.boolean(),
+    // "Show reviews" — stored inverted on the product as `reviewsHidden`. Off by
+    // default for new products (reviews stay hidden until the admin opts in).
+    showReviews: z.boolean(),
   })
   .refine(
     (d) =>
@@ -133,10 +155,11 @@ interface ProductFormProps {
   dealMode?: boolean;
 }
 
-interface ColorRow {
-  name: string;
-  hex: string;
-}
+// `ImageItem` and `ColorVariant` are shared with the per-colour card component
+// (color-variant-card.tsx). A product image is either an already-hosted URL
+// (existing products / prior uploads) or a locally-selected File not yet
+// uploaded — local files are only pushed to Cloudinary when the admin saves the
+// form (see onSubmit); until then they show an object-URL preview + "Pending".
 
 /** "S, M, L" → ["S","M","L"] (trimmed, de-duped, empties dropped). */
 function parseList(text?: string): string[] {
@@ -169,26 +192,56 @@ export function ProductForm({
 
   // Curated fabric list (real backend), so the fabric field can offer
   // "select or type". Products still store fabric as a plain string.
-  const { data: fabricList = [] } = useFabrics();
-  const fabricOptions = fabricList.map((f) => f.name);
+  //
+  // Fetched as one bounded page rather than scroll-loaded: this is a hand-
+  // maintained pick-list of a few dozen entries, and the field also accepts a
+  // typed-in value, so the dropdown is a convenience rather than the only way
+  // to set it. PICKER_LIMIT is the server's maximum page size.
+  const { data: fabricPage } = useFabrics({ limit: PICKER_LIMIT });
+  const fabricOptions = (fabricPage?.data ?? []).map((f) => f.name);
 
   // Admin-managed collections ("Shop by mood"). A product may belong to many;
   // membership is stored on the product as an array of collection slugs.
-  const { data: collectionList = [] } = useAdminQuery<Collection[]>(
-    ["collections"],
-    () => collectionsService(axiosAuth).getAll(),
+  // Rendered as chips (all at once), so this is bounded rather than paged.
+  const { data: collectionPage } = useAdminQuery(
+    ["collections", "product-form"],
+    () => collectionsService(axiosAuth).getAll({ limit: PICKER_LIMIT }),
     { showErrorToast: false },
   );
+  const collectionList: Collection[] = collectionPage?.data ?? [];
 
   const p = product as any;
 
-  // Arrays live outside RHF for simple add/remove UX.
-  const [images, setImages] = useState<string[]>(() =>
-    Array.isArray(p?.images) ? p.images.filter((x: unknown) => typeof x === "string") : [],
+  // Arrays live outside RHF for simple add/remove UX. Existing product images
+  // come in as hosted URLs; newly picked files stay local until submit.
+  const [images, setImages] = useState<ImageItem[]>(() =>
+    Array.isArray(p?.images)
+      ? p.images
+          .filter((x: unknown): x is string => typeof x === "string")
+          .map((url: string) => ({ kind: "url" as const, url }))
+      : [],
   );
-  const [colors, setColors] = useState<ColorRow[]>(() =>
+  const [colors, setColors] = useState<ColorVariant[]>(() =>
     Array.isArray(p?.colors)
-      ? p.colors.map((c: any) => ({ name: c?.name ?? "", hex: c?.hex ?? "#000000" }))
+      ? p.colors.map((c: any) => ({
+          name: c?.name ?? "",
+          hex: c?.hex ?? "#000000",
+          images: Array.isArray(c?.images)
+            ? c.images
+                .filter((x: unknown): x is string => typeof x === "string")
+                .map((url: string) => ({ kind: "url" as const, url }))
+            : [],
+          sizes: Array.isArray(c?.sizes)
+            ? c.sizes.filter((x: unknown) => typeof x === "string")
+            : [],
+          soldOutSizes: Array.isArray(c?.soldOutSizes)
+            ? c.soldOutSizes.filter((x: unknown) => typeof x === "string")
+            : [],
+          price: typeof c?.price === "number" ? c.price : undefined,
+          compareAtPrice:
+            typeof c?.compareAtPrice === "number" ? c.compareAtPrice : undefined,
+          stock: typeof c?.stock === "number" ? c.stock : undefined,
+        }))
       : [],
   );
   const [sizes, setSizes] = useState<string[]>(() =>
@@ -225,27 +278,80 @@ export function ProductForm({
       onSale: p?.onSale ?? false,
       essential: p?.essential ?? false,
       isActive: p?.isActive ?? true,
+      // New products default to OFF (reviews hidden); editing loads the product's
+      // current state — `showReviews` is the inverse of `reviewsHidden`.
+      showReviews: mode === "create" ? false : !(p?.reviewsHidden ?? false),
     },
   });
 
-  const addColor = () => setColors((c) => [...c, { name: "", hex: "#000000" }]);
+  const addColor = () =>
+    setColors((c) => [
+      ...c,
+      {
+        name: "",
+        hex: "#000000",
+        images: [],
+        sizes: [],
+        soldOutSizes: [],
+        price: undefined,
+        compareAtPrice: undefined,
+        stock: undefined,
+      },
+    ]);
   const removeColor = (i: number) =>
     setColors((c) => c.filter((_, idx) => idx !== i));
-  const updateColor = (i: number, patch: Partial<ColorRow>) =>
+  const updateColor = (i: number, patch: Partial<ColorVariant>) =>
     setColors((c) => c.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
 
-  const addImage = () => setImages((imgs) => [...imgs, ""]);
   const removeImage = (i: number) =>
-    setImages((imgs) => imgs.filter((_, idx) => idx !== i));
-  const updateImage = (i: number, url: string) =>
-    setImages((imgs) => imgs.map((v, idx) => (idx === i ? url : v)));
+    setImages((imgs) => {
+      const target = imgs[i];
+      if (target?.kind === "file") URL.revokeObjectURL(target.preview);
+      return imgs.filter((_, idx) => idx !== i);
+    });
 
-  // Local file upload → Cloudinary (via the real backend), appending the
-  // returned URLs to the images list. Capped at MAX_IMAGES total.
-  const [uploading, setUploading] = useState(false);
+  // Image order IS the display order everywhere — images[0] is the primary /
+  // thumbnail. Admins reorder by dragging (desktop) or the ◀ ▶ / ★ controls
+  // (works on touch too, where native drag-and-drop doesn't fire).
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  const moveImage = (from: number, to: number) =>
+    setImages((imgs) => {
+      if (
+        from === to ||
+        from < 0 ||
+        to < 0 ||
+        from >= imgs.length ||
+        to >= imgs.length
+      ) {
+        return imgs;
+      }
+      const next = [...imgs];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+
+  const makePrimary = (i: number) => moveImage(i, 0);
+
+  // Revoke any outstanding local previews on unmount to avoid leaking blobs.
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  useEffect(
+    () => () => {
+      for (const img of imagesRef.current) {
+        if (img.kind === "file") URL.revokeObjectURL(img.preview);
+      }
+    },
+    [],
+  );
+
+  // Local file selection — held in memory with an object-URL preview and only
+  // uploaded to Cloudinary on submit (see onSubmit). Capped at MAX_IMAGES total.
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const onFilesChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onFilesChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
     const chosen = Array.from(e.target.files ?? []);
     e.target.value = ""; // reset so the same file can be re-picked later
     if (chosen.length === 0) return;
@@ -258,41 +364,93 @@ export function ProductForm({
     let files = chosen;
     if (chosen.length > remaining) {
       toast.warning(
-        `Only ${remaining} more image${remaining === 1 ? "" : "s"} allowed — uploading the first ${remaining}.`,
+        `Only ${remaining} more image${remaining === 1 ? "" : "s"} allowed — keeping the first ${remaining}.`,
       );
       files = chosen.slice(0, remaining);
     }
 
-    setUploading(true);
-    try {
-      const result = await uploadProductImages(files);
-      if (result.uploaded.length > 0) {
-        setImages((imgs) => [...imgs, ...result.uploaded.map((u) => u.url)]);
-        toast.success(
-          `Uploaded ${result.totalUploaded} image${result.totalUploaded === 1 ? "" : "s"}.`,
-        );
-      }
-      if (result.totalFailed > 0) {
-        toast.error(
-          `${result.totalFailed} image${result.totalFailed === 1 ? "" : "s"} failed to upload`,
-          { description: result.failed.map((f) => f.fileName).join(", ") },
-        );
-      }
-    } catch (err: any) {
-      const msg =
-        err?.response?.data?.message ?? err?.message ?? "Upload failed";
-      toast.error("Image upload failed", {
-        description: Array.isArray(msg) ? msg.join(", ") : String(msg),
-      });
-    } finally {
-      setUploading(false);
-    }
+    const items: ImageItem[] = files.map((file) => ({
+      kind: "file",
+      file,
+      preview: URL.createObjectURL(file),
+    }));
+    setImages((imgs) => [...imgs, ...items]);
   };
 
   const onSubmit = async (data: ProductFormValues) => {
-    const cleanImages = images.map((u) => u.trim()).filter(Boolean);
+    setSubmitting(true);
+
+    // Upload any locally-selected files to Cloudinary now (deferred from select),
+    // then build ordered URL lists — hosted URLs stay in place, pending files are
+    // swapped for their uploaded URLs. The product gallery and each colour's
+    // gallery upload as SEPARATE calls so no single request exceeds the server's
+    // per-request limit. Bail on any failure so we never save missing images.
+    const uploadGroup = async (items: ImageItem[]): Promise<string[]> => {
+      const pending = items.filter(
+        (img): img is Extract<ImageItem, { kind: "file" }> =>
+          img.kind === "file",
+      );
+      let uploadedUrls: string[] = [];
+      if (pending.length > 0) {
+        const result = await uploadProductImages(pending.map((f) => f.file));
+        if (result.totalFailed > 0) {
+          const e = new Error("upload-failed") as Error & {
+            failed?: { fileName: string }[];
+          };
+          e.failed = result.failed;
+          throw e;
+        }
+        uploadedUrls = result.uploaded.map((u) => u.url);
+      }
+      let next = 0;
+      return items
+        .map((img) => (img.kind === "url" ? img.url : uploadedUrls[next++]))
+        .map((u) => (u ?? "").trim())
+        .filter(Boolean);
+    };
+
+    let cleanImages: string[];
+    let colorImageUrls: string[][];
+    try {
+      cleanImages = await uploadGroup(images);
+      colorImageUrls = [];
+      for (const c of colors) {
+        colorImageUrls.push(await uploadGroup(c.images));
+      }
+    } catch (err: any) {
+      if (Array.isArray(err?.failed)) {
+        const n = err.failed.length;
+        toast.error(`${n} image${n === 1 ? "" : "s"} failed to upload`, {
+          description: err.failed
+            .map((f: { fileName: string }) => f.fileName)
+            .join(", "),
+        });
+      } else {
+        const msg =
+          err?.response?.data?.message ?? err?.message ?? "Upload failed";
+        toast.error("Image upload failed", {
+          description: Array.isArray(msg) ? msg.join(", ") : String(msg),
+        });
+      }
+      setSubmitting(false);
+      return;
+    }
+
+    // Build colours with their resolved images. Sold-out is clamped to the
+    // colour's own sizes; blank numbers are omitted so the server stores null
+    // (→ the colour inherits the product-level default).
     const cleanColors = colors
-      .map((c) => ({ name: c.name.trim(), hex: c.hex.trim() }))
+      .map((c, i) => ({
+        name: c.name.trim(),
+        hex: c.hex.trim(),
+        images: colorImageUrls[i],
+        sizes: c.sizes,
+        soldOutSizes: c.soldOutSizes.filter((s) => c.sizes.includes(s)),
+        price: typeof c.price === "number" ? c.price : undefined,
+        compareAtPrice:
+          typeof c.compareAtPrice === "number" ? c.compareAtPrice : undefined,
+        stock: typeof c.stock === "number" ? c.stock : undefined,
+      }))
       .filter((c) => c.name.length > 0)
       .map((c, i) => ({ ...c, position: i }));
 
@@ -317,9 +475,10 @@ export function ProductForm({
       onSale: data.onSale,
       essential: data.essential,
       isActive: data.isActive,
+      // Stored inverted: the switch is "Show reviews", the column is "hidden".
+      reviewsHidden: !data.showReviews,
     };
 
-    setSubmitting(true);
     try {
       const service = productsService(axiosAuth);
       if (mode === "create") {
@@ -390,10 +549,19 @@ export function ProductForm({
 
   const compareAt = form.watch("compareAtPrice");
   const price = form.watch("price");
+  const stock = form.watch("stock");
   const discountPct =
     compareAt && price && Number(compareAt) > Number(price)
       ? Math.round(((Number(compareAt) - Number(price)) / Number(compareAt)) * 100)
       : null;
+
+  // Product-level defaults shown as placeholders in each colour card, so admins
+  // can see at a glance what a blank per-colour field will inherit.
+  const productDefaults = {
+    price: typeof price === "number" ? price : undefined,
+    compareAtPrice: typeof compareAt === "number" ? compareAt : undefined,
+    stock: typeof stock === "number" ? stock : undefined,
+  };
 
   return (
     <Form {...form}>
@@ -616,54 +784,144 @@ export function ProductForm({
           <CardHeader>
             <CardTitle>Images</CardTitle>
             <CardDescription>
-              Upload up to {MAX_IMAGES} images (stored on Cloudinary) or paste
-              hosted URLs. The first image is the primary/thumbnail.
+              Add up to {MAX_IMAGES} images. Photo #1 is the primary/thumbnail
+              shown first everywhere — drag to reorder, or use ★ to set any photo
+              as primary. Selected files upload to Cloudinary when you save.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {images.length === 0 && (
               <p className="text-sm text-muted-foreground">No images yet.</p>
             )}
-            {images.map((url, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md border bg-muted">
-                  {url.trim() ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={url}
-                      alt=""
-                      className="h-full w-full object-cover"
-                      onError={(e) => {
-                        (e.currentTarget.style.display = "none");
+            {images.length > 0 && (
+              <div className="flex flex-wrap gap-3">
+                {images.map((img, i) => {
+                  const src = img.kind === "url" ? img.url : img.preview;
+                  const isPrimary = i === 0;
+                  const isLast = i === images.length - 1;
+                  return (
+                    <div
+                      key={i}
+                      draggable
+                      onDragStart={(e) => {
+                        setDragIndex(i);
+                        e.dataTransfer.effectAllowed = "move";
                       }}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                      <ImageOff className="h-5 w-5" />
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        if (dragOverIndex !== i) setDragOverIndex(i);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (dragIndex !== null) moveImage(dragIndex, i);
+                        setDragIndex(null);
+                        setDragOverIndex(null);
+                      }}
+                      onDragEnd={() => {
+                        setDragIndex(null);
+                        setDragOverIndex(null);
+                      }}
+                      className={cn(
+                        "group relative h-28 w-28 shrink-0 cursor-grab overflow-hidden rounded-md border bg-muted transition active:cursor-grabbing",
+                        dragIndex === i && "opacity-50",
+                        dragOverIndex === i &&
+                          dragIndex !== i &&
+                          "ring-2 ring-primary ring-offset-1",
+                      )}
+                    >
+                      {src.trim() ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={src}
+                          alt=""
+                          draggable={false}
+                          className="h-full w-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.style.display = "none";
+                          }}
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                          <ImageOff className="h-5 w-5" />
+                        </div>
+                      )}
+
+                      {/* Position (1-based); the primary photo is always #1. */}
+                      <span className="absolute left-1 top-1 z-20 rounded bg-background/90 px-1.5 text-[10px] font-semibold text-foreground shadow ring-1 ring-black/10">
+                        {i + 1}
+                      </span>
+
+                      {/* Remove */}
+                      <button
+                        type="button"
+                        draggable={false}
+                        onClick={() => removeImage(i)}
+                        aria-label="Remove image"
+                        className="absolute right-1 top-1 z-20 flex h-6 w-6 items-center justify-center rounded-full bg-background/90 text-foreground shadow ring-1 ring-black/10 transition hover:bg-destructive hover:text-destructive-foreground"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+
+                      {/* Reorder / set-primary controls. The backdrop is
+                          pointer-events-none so a drag still starts anywhere on
+                          the tile; each button re-enables pointer events. Shown
+                          on hover (desktop) and always on touch. */}
+                      <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-1 bg-black/45 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 group-hover:opacity-100">
+                        <button
+                          type="button"
+                          draggable={false}
+                          onClick={() => moveImage(i, i - 1)}
+                          disabled={isPrimary}
+                          aria-label="Move left"
+                          title="Move left"
+                          className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full bg-background/95 text-foreground shadow ring-1 ring-black/10 transition hover:bg-primary hover:text-primary-foreground disabled:opacity-40"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        {!isPrimary && (
+                          <button
+                            type="button"
+                            draggable={false}
+                            onClick={() => makePrimary(i)}
+                            aria-label="Set as primary"
+                            title="Set as primary"
+                            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full bg-background/95 text-foreground shadow ring-1 ring-black/10 transition hover:bg-primary hover:text-primary-foreground"
+                          >
+                            <Star className="h-4 w-4" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          draggable={false}
+                          onClick={() => moveImage(i, i + 1)}
+                          disabled={isLast}
+                          aria-label="Move right"
+                          title="Move right"
+                          className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full bg-background/95 text-foreground shadow ring-1 ring-black/10 transition hover:bg-primary hover:text-primary-foreground disabled:opacity-40"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+
+                      {/* Pending upload */}
+                      {img.kind === "file" && (
+                        <span className="absolute bottom-1 left-1 z-20 rounded bg-amber-500/90 px-1 text-[9px] font-medium text-white">
+                          Pending
+                        </span>
+                      )}
+
+                      {/* Primary marker */}
+                      {isPrimary && (
+                        <span className="absolute bottom-1 right-1 z-20 flex items-center gap-0.5 rounded bg-primary/90 px-1 text-[9px] font-medium text-primary-foreground">
+                          <Star className="h-2.5 w-2.5 fill-current" /> Primary
+                        </span>
+                      )}
                     </div>
-                  )}
-                  {i === 0 && url.trim() && (
-                    <span className="absolute bottom-0 left-0 right-0 bg-primary/80 text-center text-[9px] font-medium text-primary-foreground">
-                      Primary
-                    </span>
-                  )}
-                </div>
-                <Input
-                  value={url}
-                  onChange={(e) => updateImage(i, e.target.value)}
-                  placeholder="https://…/image.jpg"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => removeImage(i)}
-                  aria-label="Remove image"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                  );
+                })}
               </div>
-            ))}
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -677,23 +935,9 @@ export function ProductForm({
                 type="button"
                 size="sm"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={uploading || images.length >= MAX_IMAGES}
+                disabled={submitting || images.length >= MAX_IMAGES}
               >
-                {uploading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="mr-2 h-4 w-4" />
-                )}
-                {uploading ? "Uploading…" : "Upload images"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addImage}
-                disabled={images.length >= MAX_IMAGES}
-              >
-                <Plus className="mr-2 h-4 w-4" /> Add image URL
+                <Upload className="mr-2 h-4 w-4" /> Upload images
               </Button>
               <span className="text-xs text-muted-foreground">
                 {images.length}/{MAX_IMAGES}
@@ -709,42 +953,29 @@ export function ProductForm({
             <CardDescription>Colours and sizes.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Colours */}
+            {/* Colours — each is a full variant. Tapping a colour on the
+                storefront shows that colour's photos; its sizes/price/stock
+                override the product defaults, and anything left blank inherits
+                them. */}
             <div className="space-y-3">
               <Label>Colours</Label>
               {colors.length === 0 && (
-                <p className="text-sm text-muted-foreground">No colours yet.</p>
+                <p className="text-sm text-muted-foreground">
+                  No colours yet. Add one to give it its own photos, sizes or
+                  price.
+                </p>
               )}
               {colors.map((c, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <input
-                    type="color"
-                    value={c.hex}
-                    onChange={(e) => updateColor(i, { hex: e.target.value })}
-                    className="h-9 w-12 shrink-0 cursor-pointer rounded border bg-background"
-                    aria-label="Colour swatch"
-                  />
-                  <Input
-                    value={c.name}
-                    onChange={(e) => updateColor(i, { name: e.target.value })}
-                    placeholder="Colour name (e.g. Ivory)"
-                  />
-                  <Input
-                    value={c.hex}
-                    onChange={(e) => updateColor(i, { hex: e.target.value })}
-                    placeholder="#f4efe6"
-                    className="w-32"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeColor(i)}
-                    aria-label="Remove colour"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                <ColorVariantCard
+                  key={i}
+                  variant={c}
+                  sizeOptions={sizeOptions}
+                  maxImages={MAX_IMAGES}
+                  disabled={submitting}
+                  productDefaults={productDefaults}
+                  onChange={(patch) => updateColor(i, patch)}
+                  onRemove={() => removeColor(i)}
+                />
               ))}
               <Button type="button" variant="outline" size="sm" onClick={addColor}>
                 <Plus className="mr-2 h-4 w-4" /> Add colour
@@ -902,13 +1133,31 @@ export function ProductForm({
               label="Active"
               description="Off = hidden from the storefront (kept in the catalogue)."
             />
-            <FlagSwitch form={form} name="isNew" label="New arrival" description="Show the “New” badge." />
-            <FlagSwitch form={form} name="onSale" label="On sale" description="Show the “Sale” badge." />
+            <FlagSwitch
+              form={form}
+              name="isNew"
+              label="New arrival"
+              description="Show the “New” badge. A product can be New or On sale, not both."
+              exclusiveWith={["onSale"]}
+            />
+            <FlagSwitch
+              form={form}
+              name="onSale"
+              label="On sale"
+              description="Show the “Sale” badge. A product can be On sale or New, not both."
+              exclusiveWith={["isNew"]}
+            />
             <FlagSwitch
               form={form}
               name="essential"
               label="Essential"
-              description="Feature in the Essentials edit."
+              description="Feature this product on the storefront’s Essentials page and homepage strip (not a card badge)."
+            />
+            <FlagSwitch
+              form={form}
+              name="showReviews"
+              label="Show reviews"
+              description="Off = the product page hides its reviews and star rating (the reviews are kept). Off by default."
             />
           </CardContent>
         </Card>
@@ -935,17 +1184,23 @@ export function ProductForm({
   );
 }
 
-// Small helper to keep the four boolean switches DRY.
+// Small helper to keep the four boolean switches DRY. `exclusiveWith` lists
+// sibling flags that must switch OFF when this one is turned ON, so only one of
+// a mutually-exclusive group (e.g. New / On sale) can be active at a time.
 function FlagSwitch({
   form,
   name,
   label,
   description,
+  exclusiveWith,
 }: {
   form: UseFormReturn<ProductFormValues>;
-  name: "isActive" | "isNew" | "onSale" | "essential";
+  name: "isActive" | "isNew" | "onSale" | "essential" | "showReviews";
   label: string;
   description: string;
+  exclusiveWith?: Array<
+    "isActive" | "isNew" | "onSale" | "essential" | "showReviews"
+  >;
 }) {
   return (
     <FormField
@@ -958,7 +1213,17 @@ function FlagSwitch({
             <FormDescription>{description}</FormDescription>
           </div>
           <FormControl>
-            <Switch checked={field.value} onCheckedChange={field.onChange} />
+            <Switch
+              checked={field.value}
+              onCheckedChange={(checked) => {
+                field.onChange(checked);
+                if (checked && exclusiveWith) {
+                  for (const other of exclusiveWith) {
+                    form.setValue(other, false, { shouldDirty: true });
+                  }
+                }
+              }}
+            />
           </FormControl>
         </FormItem>
       )}

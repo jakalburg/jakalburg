@@ -26,8 +26,16 @@ model Product {
   care           String
   stock          Int      @default(0) // simple inventory count for stock-state testing
   isActive       Boolean  @default(true) // storefront visibility gate; admin can hide a product without deleting it
+  reviewsHidden  Boolean  @default(false) // when true, the storefront hides this product's reviews + rating (data is kept; toggled in bulk from the reviews dashboard)
 
-  colors ProductColor[]
+  // Denormalized aggregates over APPROVED reviews only. Recomputed by
+  // ReviewsService on every approve / reject / delete so the listing grid and
+  // product cards can show stars without a join or a per-card count query.
+  avgRating   Float @default(0) // 0 when there are no approved reviews
+  reviewCount Int   @default(0)
+
+  colors  ProductColor[]
+  reviews Review[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -36,16 +44,34 @@ model Product {
   @@index([category])
   @@index([collection])
   @@index([isActive])
+  // Paginated list ordering. The storefront always filters on isActive and
+  // orders by createdAt (or price), so the sort can be served from the index
+  // instead of sorting the whole matching set per page.
+  @@index([isActive, createdAt])
+  @@index([isActive, price])
+  @@index([createdAt])
+  @@index([price])
 }
 
 // Colour options for a product (the storefront's only real variant axis).
+// Each colour is a full variant: it may carry its own images, sizes, sold-out
+// set, price, compare-at and stock. Empty arrays / null mean "inherit the
+// product-level default", so existing rows keep working with no backfill.
 model ProductColor {
   id        String  @id @default(cuid())
   productId String
   name      String // e.g. "Ivory"
   hex       String // e.g. "#f4efe6"
   position  Int     @default(0) // display order
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  images         String[] @default([]) // this colour's gallery; falls back to Product.images
+  sizes          String[] @default([]) // this colour's sizes; falls back to Product.sizes
+  soldOutSizes   String[] @default([]) // sold-out subset for this colour
+  price          Int? // overrides Product.price when set
+  compareAtPrice Int? // overrides Product.compareAtPrice when set
+  stock          Int? // overrides Product.stock when set
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId])
 }

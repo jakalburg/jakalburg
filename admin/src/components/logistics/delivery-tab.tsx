@@ -21,6 +21,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useOrders } from "@/hooks/use-orders";
+import {
+  TablePagination,
+  TABLE_PAGE_SIZE,
+} from "@/components/admin/table-pagination";
 import { getTrackingUrl } from "@/lib/tracking-utils";
 import { cn, formatName } from "@/lib/utils";
 import { format } from "date-fns";
@@ -43,25 +47,44 @@ const getDisplayOrderNumber = (order: any) =>
   order?.id?.slice(-8).toUpperCase();
 
 export function DeliveryTab() {
-  const { data: ordersData, isLoading } = useOrders({
-    limit: 500,
-  });
-  const shipments = ((ordersData?.items || []) as any[]).filter((order) =>
-    ["shipped", "out_for_delivery", "delivered"].includes(
-      String(order.status || "").toLowerCase(),
-    ),
-  );
   const [activeTab, setActiveTab] = useState("shipments");
+  const [activePage, setActivePage] = useState(1);
+  const [completedPage, setCompletedPage] = useState(1);
 
-  const activeShipments = shipments.filter(
-    (s: any) => s.status !== "delivered" && s.status !== "failed",
-  );
-  const completedShipments = shipments.filter(
-    (s: any) => s.status === "delivered" || s.status === "failed",
-  );
+  // One paged query per tab, each filtered by status in SQL. This used to be a
+  // single `useOrders({ limit: 500 })` split client-side — but the server caps
+  // `limit` at 100, so both tables and every counter below silently described
+  // no more than the 100 most recent orders.
+  const { data: activeData, isLoading: isLoadingActive } = useOrders({
+    status: "shipped",
+    page: activePage,
+    limit: TABLE_PAGE_SIZE,
+  });
+  const { data: completedData, isLoading: isLoadingCompleted } = useOrders({
+    status: "delivered",
+    page: completedPage,
+    limit: TABLE_PAGE_SIZE,
+  });
 
+  // Orders mirror `data` as `items`; read either.
+  const activeShipments =
+    (activeData as any)?.items ?? (activeData as any)?.data ?? [];
+  const activeTotal = (activeData as any)?.total ?? activeShipments.length;
+  const activeTotalPages = (activeData as any)?.totalPages ?? 1;
+
+  const completedShipments =
+    (completedData as any)?.items ?? (completedData as any)?.data ?? [];
+  const completedTotal =
+    (completedData as any)?.total ?? completedShipments.length;
+  const completedTotalPages = (completedData as any)?.totalPages ?? 1;
+
+  // Courier/tracking have no backing columns in the lean store, so this is
+  // always 0 — counting it over the loaded page rather than the whole table
+  // therefore costs nothing.
   const activeCompaniesCount = new Set(
-    shipments.map((s) => s.courierName).filter(Boolean),
+    [...activeShipments, ...completedShipments]
+      .map((s: any) => s.courierName)
+      .filter(Boolean),
   ).size;
 
   return (
@@ -76,7 +99,7 @@ export function DeliveryTab() {
             <Package2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{activeShipments.length}</div>
+            <div className="text-2xl font-bold">{activeTotal}</div>
           </CardContent>
         </Card>
         <Card>
@@ -86,7 +109,10 @@ export function DeliveryTab() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {shipments.filter((s: any) => s.status === "in_transit").length}
+              {
+                activeShipments.filter((s: any) => s.status === "in_transit")
+                  .length
+              }
             </div>
           </CardContent>
         </Card>
@@ -97,7 +123,7 @@ export function DeliveryTab() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {completedShipments.length}
+              {completedTotal}
             </div>
           </CardContent>
         </Card>
@@ -139,14 +165,14 @@ export function DeliveryTab() {
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList>
               <TabsTrigger value="shipments">
-                Active ({activeShipments.length})
+                Active ({activeTotal})
               </TabsTrigger>
               <TabsTrigger value="completed">
-                Completed ({completedShipments.length})
+                Completed ({completedTotal})
               </TabsTrigger>
             </TabsList>
             <TabsContent value="shipments" className="mt-4">
-              {isLoading ? (
+              {isLoadingActive ? (
                 <TableSkeleton rows={5} columns={7} />
               ) : (
                 <>
@@ -353,11 +379,18 @@ export function DeliveryTab() {
                       ))}
                     </div>
                   )}
+                  <TablePagination
+                    currentPage={activePage}
+                    totalPages={activeTotalPages}
+                    total={activeTotal}
+                    onPageChange={setActivePage}
+                    itemLabel="active shipments"
+                  />
                 </>
               )}
             </TabsContent>
             <TabsContent value="completed" className="mt-4">
-              {isLoading ? (
+              {isLoadingCompleted ? (
                 <TableSkeleton rows={5} columns={5} />
               ) : (
                 <>
@@ -501,6 +534,14 @@ export function DeliveryTab() {
                       ))}
                     </div>
                   )}
+
+                  <TablePagination
+                    currentPage={completedPage}
+                    totalPages={completedTotalPages}
+                    total={completedTotal}
+                    onPageChange={setCompletedPage}
+                    itemLabel="completed shipments"
+                  />
                 </>
               )}
             </TabsContent>

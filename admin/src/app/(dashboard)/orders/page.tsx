@@ -7,7 +7,7 @@ export default function OrdersRedirect() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/logistics?tab=orders");
+    router.replace("/logistics/orders");
   }, [router]);
 
   return null;

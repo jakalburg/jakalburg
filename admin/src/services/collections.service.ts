@@ -1,6 +1,7 @@
 import { AxiosInstance } from "axios";
 import API_ENDPOINTS from "@/config/endpoints";
 import { realApi } from "@/lib/api/real-axios";
+import { Paginated, toPaginated, type PaginationParams } from "@/types/pagination";
 
 // ---------------------------------------------------------------------------
 // Collections service — the storefront's editorial collections ("Shop by
@@ -45,11 +46,13 @@ export type UpdateCollectionDto = Partial<CreateCollectionDto>;
  *   compatibility but intentionally unused; collections use `realApi`.
  */
 export const collectionsService = (_api: AxiosInstance) => ({
-  async getAll(): Promise<Collection[]> {
-    const response = await realApi.get<Collection[]>(
-      API_ENDPOINTS.collections.all,
-    );
-    return Array.isArray(response.data) ? response.data : [];
+  // One page of collections. Omitting params returns the storefront-nav-sized
+  // page the server defaults to.
+  async getAll(params?: PaginationParams): Promise<Paginated<Collection>> {
+    const response = await realApi.get(API_ENDPOINTS.collections.all, {
+      params,
+    });
+    return toPaginated<Collection>(response.data);
   },
 
   async getById(id: string): Promise<Collection> {

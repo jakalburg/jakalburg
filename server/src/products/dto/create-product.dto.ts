@@ -30,6 +30,54 @@ export class ProductColorDto {
   @IsInt()
   @Min(0)
   position?: number;
+
+  // --- Per-colour variant overrides. Empty / omitted means "inherit the
+  // product-level value". ---------------------------------------------------
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: "This colour's image URLs; falls back to the product images when empty.",
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  images?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: "This colour's sizes; falls back to the product sizes when empty.",
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  sizes?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Sold-out sizes for this colour.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  soldOutSizes?: string[];
+
+  @ApiPropertyOptional({ example: 1290, description: 'Overrides the product price for this colour.' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  price?: number;
+
+  @ApiPropertyOptional({ example: 1690, description: 'Overrides the product compare-at price for this colour.' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  compareAtPrice?: number;
+
+  @ApiPropertyOptional({ example: 42, description: 'Overrides the product stock for this colour.' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  stock?: number;
 }
 
 /**
@@ -159,6 +207,16 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      "When true, the storefront hides this product's reviews + rating " +
+      '(the reviews themselves are kept). Defaults to false.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  reviewsHidden?: boolean;
 
   @ApiPropertyOptional({ type: [ProductColorDto] })
   @IsOptional()

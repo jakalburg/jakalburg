@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { DataTable } from "@/components/admin/data-table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { format } from "date-fns";
@@ -32,14 +33,39 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { useDebounce } from "@/hooks/use-debounce";
+import {
+  TablePagination,
+  TABLE_PAGE_SIZE,
+} from "@/components/admin/table-pagination";
 
 type SortKey = "name-asc" | "name-desc" | "orders-desc" | "spent-desc" | "joined-desc";
 
 export function CustomersTab() {
-  const { data: customers = [], isLoading, error } = useCustomers();
-  const { mutate: deleteCustomer } = useDeleteCustomer();
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("joined-desc");
+  const [page, setPage] = useState(1);
+
+  const debouncedSearch = useDebounce(searchQuery, 300);
+
+  // Search, sort and paging all happen in the database.
+  const { data, isLoading, error } = useCustomers({
+    page,
+    limit: TABLE_PAGE_SIZE,
+    search: debouncedSearch.trim() || undefined,
+    sort: sortKey,
+  });
+  const { mutate: deleteCustomer } = useDeleteCustomer();
+
+  const customers = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
+
+  // A new search or sort invalidates the page the admin was on.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, sortKey]);
 
   const handleDelete = (id: string) => {
     deleteCustomer(id, {
@@ -52,42 +78,8 @@ export function CustomersTab() {
     });
   };
 
-  const processedCustomers = useMemo(() => {
-    let list = [...(customers as any[])];
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(
-        (c) =>
-          c.name?.toLowerCase().includes(q) ||
-          c.email?.toLowerCase().includes(q) ||
-          c.phone?.toLowerCase().includes(q),
-      );
-    }
-
-    switch (sortKey) {
-      case "name-asc":
-        list.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-        break;
-      case "name-desc":
-        list.sort((a, b) => (b.name || "").localeCompare(a.name || ""));
-        break;
-      case "orders-desc":
-        list.sort((a, b) => (b.totalOrders || 0) - (a.totalOrders || 0));
-        break;
-      case "spent-desc":
-        list.sort((a, b) => (b.totalSpent || 0) - (a.totalSpent || 0));
-        break;
-      case "joined-desc":
-        list.sort(
-          (a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        );
-        break;
-    }
-
-    return list;
-  }, [customers, searchQuery, sortKey]);
+  // Already the right page, in the right order — the server did both.
+  const processedCustomers = customers as any[];
 
   const columns = [
     {
@@ -125,6 +117,7 @@ export function CustomersTab() {
         customer.phone ? (
           <a
             href={`tel:${customer.phone}`}
+            onClick={(e) => e.stopPropagation()}
             className="flex items-center gap-1.5 text-primary hover:underline font-medium"
           >
             <Phone className="w-3 h-3" />
@@ -165,6 +158,7 @@ export function CustomersTab() {
               variant="ghost"
               size="icon"
               className="text-destructive hover:text-destructive/90"
+              onClick={(e) => e.stopPropagation()}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -225,7 +219,7 @@ export function CustomersTab() {
         </Button>
       )}
       <span className="text-sm text-muted-foreground self-center ml-auto whitespace-nowrap">
-        {processedCustomers.length} of {(customers as any[]).length}
+        {processedCustomers.length} of {total}
       </span>
     </div>
   );
@@ -243,7 +237,17 @@ export function CustomersTab() {
           error={error}
           emptyMessage={searchQuery ? "No customers match your search" : "No customers found"}
           getRowKey={(customer: any) => customer.id}
+          onRowClick={(customer: any) => router.push(`/customers/${customer.id}`)}
         />
+        {!isLoading && !error && (
+          <TablePagination
+            currentPage={page}
+            totalPages={totalPages}
+            total={total}
+            onPageChange={setPage}
+            itemLabel="customers"
+          />
+        )}
       </div>
 
       {/* Mobile View */}
@@ -266,7 +270,19 @@ export function CustomersTab() {
                   .toUpperCase() || "??";
 
               return (
-                <Card key={customer.id}>
+                <Card
+                  key={customer.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => router.push(`/customers/${customer.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      router.push(`/customers/${customer.id}`);
+                    }
+                  }}
+                  className="cursor-pointer transition-colors hover:bg-muted/30"
+                >
                   <CardContent className="pt-6">
                     <div className="space-y-3">
                       <div className="flex items-center gap-3">
@@ -291,6 +307,7 @@ export function CustomersTab() {
                             {customer.phone ? (
                               <a
                                 href={`tel:${customer.phone}`}
+                                onClick={(e) => e.stopPropagation()}
                                 className="flex items-center gap-1 text-sm text-primary hover:underline"
                               >
                                 <Phone className="w-3 h-3" />
@@ -328,6 +345,7 @@ export function CustomersTab() {
                           <Button
                             variant="outline"
                             className="w-full text-destructive hover:text-destructive"
+                            onClick={(e) => e.stopPropagation()}
                           >
                             <Trash2 className="h-4 w-4 mr-2" />
                             Delete
@@ -361,6 +379,15 @@ export function CustomersTab() {
               );
             })}
           </div>
+        )}
+        {!isLoading && !error && (
+          <TablePagination
+            currentPage={page}
+            totalPages={totalPages}
+            total={total}
+            onPageChange={setPage}
+            itemLabel="customers"
+          />
         )}
       </div>
     </div>

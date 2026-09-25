@@ -8,6 +8,7 @@ export function useOrders(params?: {
   page?: number;
   limit?: number;
   status?: string;
+  search?: string;
   sort?: string;
 }) {
   const axiosAuth = useAxiosAuth();
@@ -146,9 +147,18 @@ export function useSyncOrderToSheet() {
   const axiosAuth = useAxiosAuth();
   return useMutation({
     mutationFn: (id: string) => ordersService(axiosAuth).syncSheet(id),
-    onSuccess: (data, id) => {
+    // The endpoint answers 200 with {success:false} when the script or the
+    // network rejected the order (bad secret, stale deployment, timeout), so a
+    // resolved request is NOT the same as a synced order — the body decides.
+    onSuccess: (data: any, id) => {
       queryClient.invalidateQueries({ queryKey: ["order", id] });
-      toast.success(data?.message || "Order synced to Google Sheets");
+      if (data?.skipped) {
+        toast.warning(data.message || "Google Sheets sync isn't configured.");
+      } else if (data?.success === false) {
+        toast.error("Failed to sync to Google Sheets", { description: data.message });
+      } else {
+        toast.success(data?.message || "Order synced to Google Sheets");
+      }
     },
     onError: (error: any, id) => {
       const description =
@@ -167,7 +177,13 @@ export function useSyncOrdersToSheet() {
       const results = await Promise.allSettled(
         ids.map((id) => ordersService(axiosAuth).syncSheet(id)),
       );
-      const failed = results.filter((result) => result.status === "rejected");
+      // A rejected request AND a resolved one carrying {success:false} both
+      // mean "this order didn't reach the sheet" — counting only rejections
+      // would report a clean sweep while rows were silently missing.
+      const failed = results.filter(
+        (result) =>
+          result.status === "rejected" || result.value?.success === false,
+      );
 
       if (failed.length > 0) {
         throw new Error(

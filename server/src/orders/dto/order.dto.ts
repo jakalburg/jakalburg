@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { PaginatedResponseDto } from '../../common/pagination';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsEmail,
@@ -37,9 +39,22 @@ export class OrderItemInputDto {
 }
 
 export class CreateOrderDto {
-  @ApiProperty({ type: [OrderItemInputDto] })
+  /**
+   * The lines being ordered, capped at the same 200 the cart accepts (see
+   * PutCartDto) because an order is only ever placed from a cart.
+   *
+   * The cap is what keeps every later read of this order bounded: an order's
+   * items are always loaded whole (`INCLUDE_ITEMS` / `ADMIN_INCLUDE`, the
+   * customer's order history, the admin orders table, the customer detail
+   * sheet, the invoice and the confirmation emails all need the full set, so
+   * none of them can paginate it). Without a write-time limit a single crafted
+   * checkout could give one order an unbounded item count, and that order would
+   * then drag its entire line set into every paginated list that contains it.
+   */
+  @ApiProperty({ type: [OrderItemInputDto], maxItems: 200 })
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(200)
   @ValidateNested({ each: true })
   @Type(() => OrderItemInputDto)
   items: OrderItemInputDto[];
@@ -49,11 +64,24 @@ export class CreateOrderDto {
   @Min(0)
   shipping: number;
 
-  @ApiPropertyOptional({ example: 0, description: 'Discount in whole INR.' })
+  @ApiPropertyOptional({
+    example: 0,
+    description:
+      'Ignored — the server recomputes the discount from `couponCode` so ' +
+      'totals cannot be tampered with. Kept for backward compatibility.',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
   discount?: number;
+
+  @ApiPropertyOptional({
+    example: 'SAVE20',
+    description: 'Coupon code to apply. Validated and priced server-side.',
+  })
+  @IsOptional()
+  @IsString()
+  couponCode?: string;
 
   @ApiProperty({ type: AddressDto })
   @ValidateNested()
@@ -120,6 +148,9 @@ export class OrderResponseDto {
   @ApiProperty({ example: 0 })
   discount: number;
 
+  @ApiPropertyOptional({ example: 'SAVE20', description: 'Coupon applied, if any.' })
+  couponCode?: string | null;
+
   @ApiProperty({ example: 2779 })
   total: number;
 
@@ -134,4 +165,10 @@ export class OrderResponseDto {
 
   @ApiProperty({ example: 'Card ending •••• 4242' })
   paymentLabel: string;
+}
+
+/** Paginated order-history envelope. */
+export class OrderListResponseDto extends PaginatedResponseDto<OrderResponseDto> {
+  @ApiProperty({ type: [OrderResponseDto] })
+  declare data: OrderResponseDto[];
 }

@@ -140,8 +140,9 @@ export function resolveMock(method: Method, rawUrl: string, ctx: MockContext = {
     if (path === "/customers") return db.mockCustomers;
     if (seg[0] === "customers" && seg[1]) return db.mockCustomers.find((c) => c.id === seg[1]) || db.mockCustomers[0];
 
-    // Reviews
-    if (path === "/review") return db.mockReviews;
+    // Reviews are served by the real backend now (see review.service.ts →
+    // realApi). `db.mockReviews` stays put because the home-page builder still
+    // seeds its testimonial section from it.
 
     // Logs
     if (path === "/logs") {

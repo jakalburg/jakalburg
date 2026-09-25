@@ -7,16 +7,31 @@ import { Button } from "@/components/ui/button";
 import { useAppDispatch, useAppSelector } from "@/redux/hooks";
 import { selectWishlistIds, reset_wishlist } from "@/redux/features/wishlist-slice";
 import { useHydrated } from "@/hooks/useHydrated";
-import { useProducts } from "@/hooks/useProducts";
+import { useProductsInfinite } from "@/hooks/useProducts";
 
 export default function WishlistPage() {
   const hydrated = useHydrated();
   const dispatch = useAppDispatch();
   const ids = useAppSelector(selectWishlistIds);
-  const { data: products = [], isLoading } = useProducts();
-  // Preserve the saved order; drop ids no longer in the catalogue.
+
+  // Fetch exactly the saved products, a page at a time, instead of pulling the
+  // catalogue and picking them out of it.
+  const {
+    products,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+  } = useProductsInfinite(
+    { ids },
+    { enabled: hydrated && ids.length > 0 },
+  );
+
+  // Restore the saved order (the API sorts by its own rules) and drop ids that
+  // are no longer in the catalogue.
+  const byId = new Map(products.map((p) => [p.id, p]));
   const items = ids
-    .map((id) => products.find((p) => p.id === id))
+    .map((id) => byId.get(id))
     .filter((p): p is NonNullable<typeof p> => Boolean(p));
   return (
     <>
@@ -45,11 +60,27 @@ export default function WishlistPage() {
             </div>
           )}
           {hydrated && items.length > 0 && (
-            <div className="mt-10 grid grid-cols-2 gap-x-4 gap-y-10 md:grid-cols-3 lg:grid-cols-4">
-              {items.map((p) => (
-                <WishlistCard key={p.id} product={p} />
-              ))}
-            </div>
+            <>
+              <div className="mt-10 grid grid-cols-2 gap-x-4 gap-y-10 md:grid-cols-3 lg:grid-cols-4">
+                {items.map((p) => (
+                  <WishlistCard key={p.id} product={p} />
+                ))}
+              </div>
+              {hasNextPage && (
+                <div className="mt-12 flex flex-col items-center gap-4">
+                  <p className="text-xs text-mute-text">
+                    Showing {items.length} of {ids.length}
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => void fetchNextPage()}
+                    disabled={isFetchingNextPage}
+                  >
+                    {isFetchingNextPage ? "Loading…" : "Load more"}
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </section>
       </SiteLayout>

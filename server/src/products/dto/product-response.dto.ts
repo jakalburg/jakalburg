@@ -1,13 +1,40 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Gender } from '@prisma/client';
+import { PaginatedResponseDto } from '../../common/pagination';
 
-/** A single colour option, matching the client's `ProductColor` shape. */
+/** A single colour option, matching the client's `ProductColor` shape.
+ *  Per-colour variant fields are empty/undefined when the colour inherits the
+ *  product-level default; the storefront applies that fallback at render time. */
 export class ProductColorResponseDto {
   @ApiProperty({ example: 'Ivory' })
   name: string;
 
   @ApiProperty({ example: '#f4efe6', description: 'CSS hex swatch colour.' })
   hex: string;
+
+  @ApiProperty({
+    type: [String],
+    description: "This colour's images (empty → fall back to the product images).",
+  })
+  images: string[];
+
+  @ApiProperty({
+    type: [String],
+    description: "This colour's sizes (empty → fall back to the product sizes).",
+  })
+  sizes: string[];
+
+  @ApiProperty({ type: [String], description: 'Sold-out sizes for this colour.' })
+  soldOutSizes: string[];
+
+  @ApiPropertyOptional({ example: 1290, description: 'Per-colour price override.' })
+  price?: number;
+
+  @ApiPropertyOptional({ example: 1690, description: 'Per-colour compare-at override.' })
+  compareAtPrice?: number;
+
+  @ApiPropertyOptional({ example: 42, description: 'Per-colour stock override.' })
+  stock?: number;
 }
 
 /**
@@ -84,6 +111,24 @@ export class ProductResponseDto {
 
   @ApiProperty({ example: 42, description: 'Simple inventory count.' })
   stock: number;
+
+  @ApiProperty({
+    example: 4.6,
+    description:
+      'Mean of APPROVED review ratings (1 dp); 0 when there are none yet.',
+  })
+  avgRating: number;
+
+  @ApiProperty({ example: 23, description: 'Number of approved reviews.' })
+  reviewCount: number;
+
+  @ApiProperty({
+    example: false,
+    description:
+      "When true, the storefront hides this product's reviews section and " +
+      'its star rating. The review data itself is kept and can be re-shown.',
+  })
+  reviewsHidden: boolean;
 }
 
 /** Admin view of a product — adds the visibility flag + timestamps that the
@@ -100,19 +145,22 @@ export class AdminProductResponseDto extends ProductResponseDto {
 }
 
 /** Paginated admin product list envelope. */
-export class AdminProductListResponseDto {
+export class AdminProductListResponseDto extends PaginatedResponseDto<AdminProductResponseDto> {
   @ApiProperty({ type: [AdminProductResponseDto] })
-  data: AdminProductResponseDto[];
+  declare data: AdminProductResponseDto[];
+}
 
-  @ApiProperty({ example: 24 })
-  total: number;
+/** Paginated storefront product list envelope. */
+export class ProductListResponseDto extends PaginatedResponseDto<ProductResponseDto> {
+  @ApiProperty({ type: [ProductResponseDto] })
+  declare data: ProductResponseDto[];
+}
 
-  @ApiProperty({ example: 0 })
-  skip: number;
+/** Distinct filter values across a slice of the catalogue. */
+export class ProductFacetsResponseDto {
+  @ApiProperty({ type: [String], example: ['XS', 'S', 'M', 'L'] })
+  sizes: string[];
 
-  @ApiProperty({ example: 20 })
-  take: number;
-
-  @ApiProperty({ example: true })
-  hasMore: boolean;
+  @ApiProperty({ type: [String], example: ['Ivory', 'Black'] })
+  colors: string[];
 }

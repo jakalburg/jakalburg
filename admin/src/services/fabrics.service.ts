@@ -1,6 +1,7 @@
 import { AxiosInstance } from "axios";
 import API_ENDPOINTS from "../config/endpoints";
 import { realApi } from "@/lib/api/real-axios";
+import { Paginated, toPaginated, type PaginationParams } from "@/types/pagination";
 
 // ---------------------------------------------------------------------------
 // Fabrics service — the curated fabric pick-list, wired to the real NestJS
@@ -34,9 +35,13 @@ export type UpdateFabricDto = Partial<CreateFabricDto>;
  *   compatibility but intentionally unused; fabrics use `realApi`.
  */
 export const fabricsService = (_api: AxiosInstance) => ({
-  async getAll(): Promise<Fabric[]> {
-    const response = await realApi.get<Fabric[]>(API_ENDPOINTS.fabrics.getAll);
-    return Array.isArray(response.data) ? response.data : [];
+  // One page of fabrics. Feeds both the fabrics table and the product form's
+  // scroll-loaded fabric picker.
+  async getAll(params?: PaginationParams): Promise<Paginated<Fabric>> {
+    const response = await realApi.get(API_ENDPOINTS.fabrics.getAll, {
+      params,
+    });
+    return toPaginated<Fabric>(response.data);
   },
 
   async create(data: CreateFabricDto): Promise<Fabric> {
