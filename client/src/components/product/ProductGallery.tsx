@@ -98,7 +98,11 @@ function MobileGallery({
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="flex snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        // `items-start`: without it flex stretches every slide to the tallest
+        // one, and the stretched wrapper's stone background shows as a band
+        // under the shorter images. A product's shots normally share a ratio,
+        // so this only matters when one mixes them.
+        className="flex snap-x snap-mandatory items-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {images.map((src, i) => (
           <ImageShimmer
@@ -106,7 +110,14 @@ function MobileGallery({
             src={src}
             alt={i === 0 ? alt : ""}
             aria-hidden={i !== 0}
-            wrapperClassName="aspect-[4/5] w-full flex-none snap-start"
+            wrapperClassName="w-full flex-none snap-start"
+            // No fixed aspect box on mobile, deliberately. The catalogue mixes
+            // 3:4, 2:3, 9:16 and the odd landscape shot, so any single ratio
+            // either crops the garment (object-cover) or pillarboxes it
+            // (object-contain). Letting each slide take its image's natural
+            // height is the only way to be full-width AND uncropped for all of
+            // them. `h-auto` overrides the component's default `h-full`.
+            className="h-auto w-full object-contain"
             loading={i === 0 ? "eager" : "lazy"}
           />
         ))}
