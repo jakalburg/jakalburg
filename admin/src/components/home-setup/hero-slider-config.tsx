@@ -23,9 +23,11 @@ import {
   ArrowDown,
   X,
 } from "lucide-react";
-import { uploadService } from "@/services/upload.service";
+import {
+  deleteUploadedImage,
+  uploadSingleImage,
+} from "@/services/uploads.service";
 import { categoriesService } from "@/services/categories.service";
-import useAxiosAuth from "@/hooks/use-axios-auth";
 import { toast } from "sonner";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
 import { useQuery } from "@tanstack/react-query";
@@ -66,8 +68,23 @@ export interface HeroSliderItem {
 
 interface HeroCategory {
   id: string;
-  parent: string;
-  parentId?: string | null;
+  name: string;
+  slug: string;
+  genders: ("women" | "men" | "unisex")[];
+}
+
+/**
+ * One selectable hero destination: a category under a specific gender.
+ *
+ * Categories are gender-scoped on the storefront (/category/women-dresses), so
+ * a bare category isn't a link on its own — it needs the gender to resolve.
+ * A category that declares no genders is offered under both, since the admin
+ * is choosing a hero link deliberately and can see which one they want.
+ */
+interface HeroCategoryOption {
+  value: string;
+  label: string;
+  href: string;
 }
 
 interface Props {
@@ -92,7 +109,6 @@ export function HeroSliderConfigModal({
     videoUrlPattern.test(value) ||
     value.includes("/video/upload/") ||
     /[?&](resource_type|type)=video\b/i.test(value);
-  const api = useAxiosAuth();
   const [items, setItems] = useState<HeroSliderItem[]>([]);
   const [fullBleed, setFullBleed] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -105,22 +121,34 @@ export function HeroSliderConfigModal({
   >(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // A link picker has to offer every category, not just the first table page.
   const { data: categories = [] } = useQuery<HeroCategory[]>({
-    queryKey: ["categories"],
-    queryFn: () => categoriesService(api).getAll(),
+    queryKey: ["categories", "options"],
+    queryFn: () => categoriesService.listOptions(),
   });
 
-  const mainCategories = categories.filter((category) => !category.parentId);
+  const mainCategories: HeroCategoryOption[] = categories.flatMap((category) => {
+    const genders = category.genders?.length
+      ? category.genders.filter((g) => g !== "unisex")
+      : (["women", "men"] as const);
+    return [...genders].map((gender) => ({
+      value: `${gender}-${category.slug}`,
+      label: `${category.name} — ${gender === "women" ? "Women" : "Men"}`,
+      href: `/category/${gender}-${category.slug}`,
+    }));
+  });
 
+  /**
+   * Recover the selected option from a saved slide's link.
+   *
+   * Matches the real storefront route (/category/women-dresses). Slides saved
+   * under the old /shop?category=<uuid> form return "", so the dropdown shows
+   * its placeholder rather than a selection that no longer means anything —
+   * those links never worked, since this storefront has no /shop route.
+   */
   const getCategoryIdFromLink = (link?: string) => {
     if (!link) return "";
-
-    try {
-      const url = new URL(link, window.location.origin);
-      return url.searchParams.get("category") || "";
-    } catch {
-      return link.match(/[?&]category=([^&]+)/)?.[1] || "";
-    }
+    return link.match(/^\/category\/([a-z0-9-]+)/i)?.[1] || "";
   };
 
   const getSaveErrorMessage = (error: unknown) => {
@@ -341,7 +369,14 @@ export function HeroSliderConfigModal({
 
     setIsSaving(true);
     try {
-      const { uploadImage, uploadVideo, deleteUpload } = uploadService(api);
+      // The backend uploads IMAGES only (POST /uploads/images). There is no
+      // video endpoint, so a picked video file can't be stored — say so rather
+      // than silently saving a placeholder URL. Pasted video URLs still work.
+      const uploadVideo = (): never => {
+        throw new Error(
+          "Video files can't be uploaded yet — paste a hosted video URL instead.",
+        );
+      };
 
       // Track initial URLs to detect deletions and replacements
       const initialUrls: string[] = [];
@@ -362,26 +397,22 @@ export function HeroSliderConfigModal({
           let finalMobileVideo = item.mobileVideo || "";
 
           if (item.imageFile) {
-            const res = await uploadImage(item.imageFile);
-            finalImage = res.url || res.publicUrl || res.fileUrl || "";
+            finalImage = await uploadSingleImage(item.imageFile);
             finalVideo = "";
           }
 
           if (item.videoFile) {
-            const res = await uploadVideo(item.videoFile);
-            finalVideo = res.url || res.publicUrl || res.fileUrl || "";
+            finalVideo = uploadVideo();
             finalImage = "";
           }
 
           if (item.mobileImageFile) {
-            const res = await uploadImage(item.mobileImageFile);
-            finalMobileImage = res.url || res.publicUrl || res.fileUrl || "";
+            finalMobileImage = await uploadSingleImage(item.mobileImageFile);
             finalMobileVideo = "";
           }
 
           if (item.mobileVideoFile) {
-            const res = await uploadVideo(item.mobileVideoFile);
-            finalMobileVideo = res.url || res.publicUrl || res.fileUrl || "";
+            finalMobileVideo = uploadVideo();
             finalMobileImage = "";
           }
 
@@ -408,10 +439,12 @@ export function HeroSliderConfigModal({
         .filter(Boolean);
       const removedUrls = initialUrls.filter((url) => !finalUrls.includes(url));
 
-      // Trigger background deletion for removed media
-      Promise.allSettled(removedUrls.map((url) => deleteUpload(url))).catch(
-        (e) => console.error("Failed to clean up old slider images", e),
-      );
+      // Best-effort cleanup of media the admin replaced or removed. Never
+      // blocks the save — an orphaned Cloudinary asset is cheaper than a
+      // failed configuration change.
+      void Promise.allSettled(
+        removedUrls.map((url) => deleteUploadedImage(url)),
+      ).catch((e) => console.error("Failed to clean up old slider images", e));
 
       await onSave(processedItems, fullBleed);
       setHasChanges(false);
@@ -603,15 +636,18 @@ export function HeroSliderConfigModal({
                             }
                             onValueChange={(val) => {
                               const selectedCat = mainCategories.find(
-                                (category) => category.id === val,
+                                (category) => category.value === val,
                               );
                               if (selectedCat) {
                                 const newItems = items.map((t) =>
                                   t.id === item.id
                                     ? {
                                         ...t,
-                                        categoryId: selectedCat.id,
-                                        link: `/shop?category=${selectedCat.id}`,
+                                        categoryId: selectedCat.value,
+                                        // A real storefront route. This used
+                                        // to build /shop?category=<uuid> —
+                                        // /shop doesn't exist here.
+                                        link: selectedCat.href,
                                       }
                                     : t,
                                 );
@@ -625,8 +661,8 @@ export function HeroSliderConfigModal({
                             </SelectTrigger>
                             <SelectContent>
                               {mainCategories.map((cat) => (
-                                <SelectItem key={cat.id} value={cat.id}>
-                                  {cat.parent}
+                                <SelectItem key={cat.value} value={cat.value}>
+                                  {cat.label}
                                 </SelectItem>
                               ))}
                             </SelectContent>

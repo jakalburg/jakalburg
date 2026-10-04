@@ -3,6 +3,18 @@ import useAxiosAuth from "./use-axios-auth";
 import { toast } from "sonner";
 import { useSession } from "@/lib/mock-auth";
 
+/**
+ * MOCK settings blob, inherited from the kaybykhushie reference.
+ *
+ * This hook goes through `useAxiosAuth()` → mockAxios, which answers
+ * "/settings" from in-memory data — nothing saved here reaches a database.
+ * It is kept because the Payments, Delivery, Storage, Email, Alerts and
+ * Countdown tabs still read these fields and none of them has a backend yet.
+ *
+ * The REAL store identity (brand marks, name, contact details, socials, SEO)
+ * is a different model on a different seam — see `use-store-settings.ts`. Wire
+ * a field up there before trusting it.
+ */
 interface Settings {
   id: string;
   shippingCost: number;
@@ -150,62 +162,11 @@ export function useUpdateSettings() {
   });
 }
 
-export function useRedisStats() {
-  const axiosAuth = useAxiosAuth();
+// The Redis/storage hooks that used to live here were the kaybykhushie
+// originals: mock-backed, pointed at routes that don't exist on this API
+// (`/settings/redis-stats` — ours is `/settings/redis/stats`) and polling every
+// 5/10/30 seconds. Settings → Media uses `@/hooks/use-storage-settings`
+// instead, which is on realApi and fetches on demand. Polling that often is
+// what the Upstash free plan's 10,000-commands-per-DAY budget cannot survive:
+// a 5s poll alone is ~17,000.
 
-  return useQuery({
-    queryKey: ["redis-stats"],
-    queryFn: async () => {
-      const { data } = await axiosAuth.get("/settings/redis-stats");
-      return data;
-    },
-    refetchInterval: 5000, // Poll every 5s
-  });
-}
-
-export function useRedisKeys() {
-  const axiosAuth = useAxiosAuth();
-
-  return useQuery({
-    queryKey: ["redis-keys"],
-    queryFn: async () => {
-      const { data } = await axiosAuth.get<any[]>("/settings/redis-keys");
-      return data;
-    },
-    refetchInterval: 10000,
-  });
-}
-
-export function useStorageUsage() {
-  const axiosAuth = useAxiosAuth();
-
-  return useQuery({
-    queryKey: ["storage-usage"],
-    queryFn: async () => {
-      const { data } = await axiosAuth.get("/settings/storage/usage");
-      return data;
-    },
-    refetchInterval: 30000,
-  });
-}
-
-export function useResetDefaults() {
-  const queryClient = useQueryClient();
-  const axiosAuth = useAxiosAuth();
-
-  return useMutation({
-    mutationFn: async () => {
-      const { data } = await axiosAuth.post("/settings/reset-defaults");
-      return data;
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["settings"] });
-      toast.success(data.message || "Brand data reset successfully");
-    },
-    onError: (error: any) => {
-      toast.error("Failed to reset brand data", {
-        description: error.response?.data?.message || error.message,
-      });
-    },
-  });
-}

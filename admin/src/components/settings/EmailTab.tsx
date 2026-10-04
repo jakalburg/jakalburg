@@ -12,16 +12,20 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
-import useAxiosAuth from "@/hooks/use-axios-auth";
+import {
+  useEmailSettings,
+  useUpdateEmailSettings,
+  useVerifySmtp,
+} from "@/hooks/use-email-settings";
 import { toast } from "sonner";
 import { Pencil, Check, Loader2, Mail } from "lucide-react";
 import { SettingsActions } from "./settings-layout";
 
 export function EmailTab() {
-  const { data: storeSettings, isLoading } = useSettings();
-  const updateStoreMutation = useUpdateSettings();
-  const api = useAxiosAuth();
+  // REAL backend (server EmailSettings singleton), not the mock settings blob.
+  const { data: storeSettings, isLoading } = useEmailSettings();
+  const updateStoreMutation = useUpdateEmailSettings();
+  const verifySmtp = useVerifySmtp();
 
   const [smtpHost, setSmtpHost] = useState("");
   const [smtpPort, setSmtpPort] = useState(587);
@@ -30,6 +34,7 @@ export function EmailTab() {
   const [smtpPassword, setSmtpPassword] = useState("");
   const [smtpFromEmail, setSmtpFromEmail] = useState("");
   const [smtpFromName, setSmtpFromName] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
   const [isEditingSmtp, setIsEditingSmtp] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
 
@@ -42,6 +47,7 @@ export function EmailTab() {
       setSmtpPassword("");
       setSmtpFromEmail(storeSettings.smtpFromEmail || "");
       setSmtpFromName(storeSettings.smtpFromName || "");
+      setOwnerEmail(storeSettings.ownerEmail || "");
       setIsEditingSmtp(false);
     }
   }, [storeSettings]);
@@ -56,6 +62,7 @@ export function EmailTab() {
       setSmtpPassword("");
       setSmtpFromEmail(storeSettings.smtpFromEmail || "");
       setSmtpFromName(storeSettings.smtpFromName || "");
+      setOwnerEmail(storeSettings.ownerEmail || "");
     }
   };
 
@@ -68,6 +75,8 @@ export function EmailTab() {
         smtpUser,
         smtpFromEmail,
         smtpFromName,
+        ownerEmail,
+        // Blank means "keep the stored password" — never send an empty string.
         ...(smtpPassword ? { smtpPassword } : {}),
       },
       {
@@ -84,15 +93,10 @@ export function EmailTab() {
   const handleVerifySmtp = async () => {
     setIsVerifying(true);
     try {
-      const response = await api.post("/settings/verify-smtp");
-      if (response.data?.success) {
-        toast.success(response.data.message);
-      } else {
-        toast.error(
-          response.data.message || "Failed to verify SMTP credentials.",
-        );
-      }
-    } catch (error) {
+      const result = await verifySmtp.mutateAsync();
+      if (result.success) toast.success(result.message);
+      else toast.error(result.message || "Failed to verify SMTP credentials.");
+    } catch {
       toast.error("Could not reach server to verify SMTP connection.");
     } finally {
       setIsVerifying(false);
@@ -238,6 +242,31 @@ export function EmailTab() {
             <Label htmlFor="smtp-secure">
               Use Secure Connection (True for port 465)
             </Label>
+          </div>
+        </div>
+
+        <div className="space-y-4 border-t pt-4">
+          <div>
+            <h3 className="font-medium">Notifications</h3>
+            <p className="text-sm text-muted-foreground">
+              Who hears about store activity.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Owner Email (new-order alerts)</Label>
+              <Input
+                type="email"
+                placeholder="e.g. orders@store.com"
+                value={ownerEmail}
+                onChange={(e) => setOwnerEmail(e.target.value)}
+                disabled={!isEditingSmtp}
+              />
+              <p className="text-xs text-muted-foreground">
+                Where new-order notifications are delivered. Must be a real,
+                reachable mailbox.
+              </p>
+            </div>
           </div>
         </div>
       </CardContent>

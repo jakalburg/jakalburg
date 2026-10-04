@@ -1,5 +1,5 @@
 import { useAdminQuery } from "./use-admin-query";
-import { dashboardService } from "@/services/dashboard.service";
+import { dashboardService, type SalesPeriod } from "@/services/dashboard.service";
 import useAxiosAuth from "./use-axios-auth";
 
 export function useDashboardStats() {
@@ -9,9 +9,9 @@ export function useDashboardStats() {
   );
 }
 
-export function useSalesData(period: "week" | "month" | "year" = "month") {
+export function useSalesData(period: SalesPeriod = "month") {
   const axiosAuth = useAxiosAuth();
-  return useAdminQuery(["sales-data", period], () =>
+  return useAdminQuery(["dashboard-sales", period], () =>
     dashboardService(axiosAuth).getSalesData(period),
   );
 }

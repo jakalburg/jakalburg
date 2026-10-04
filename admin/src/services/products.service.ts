@@ -208,11 +208,17 @@ export const productsService = (_api: AxiosInstance) => ({
     return mapListEnvelope(response.data);
   },
 
-  // Distinct category slugs across the catalogue — feeds the product form's
-  // category combobox ("select an existing category or type a new one").
+  // Category slugs for the product form's combobox ("select an existing
+  // category or type a new one").
+  //
+  // Reads the merged picker rather than the catalogue's distinct values, so a
+  // category created in Catalog → Categories is offered here immediately —
+  // before any product uses it — while a slug already on a product but with no
+  // managed row still appears. Changed here, rather than in product-form.tsx,
+  // so the form picks it up without that file needing an edit.
   async getCategories(): Promise<string[]> {
     const response = await realApi.get<string[]>(
-      API_ENDPOINTS.products.categories,
+      API_ENDPOINTS.categories.picker,
     );
     return Array.isArray(response.data) ? response.data : [];
   },

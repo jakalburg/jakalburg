@@ -8,7 +8,7 @@ import { AdminOnly } from '../auth/decorators/admin-only.decorator';
  * WebsiteController — the admin's Home Setup tab (list + edit + seed) and the
  * storefront's public hero read.
  *
- * Static segments ('all', 'hero', 'seed') can't collide with the `:id` PATCH
+ * Static segments ('all', 'hero', 'public', 'seed') can't collide with the `:id` PATCH
  * (different HTTP verbs / distinct paths), so no route-ordering care is needed.
  *
  * NOTE: the write routes (PATCH :id, POST seed) are UNGUARDED for now, matching
@@ -39,10 +39,22 @@ export class WebsiteController {
     return this.websiteService.getHeroConfig();
   }
 
-  /** Admin: create any missing default sections (idempotent). */
+  /** Public: every enabled section, ordered — the storefront's whole home page. */
+  @Get('public')
+  @ApiOperation({ summary: 'Public: enabled home sections, ordered' })
+  @ApiOkResponse({
+    description:
+      'The enabled sections in render order. Includes the Footer row, whose ' +
+      '`data` carries the site-wide footer background images.',
+  })
+  getPublicSections() {
+    return this.websiteService.getPublicSections();
+  }
+
+  /** Admin: sync the stored sections to the canonical list (adds + prunes). */
   @Post('seed')
   @AdminOnly()
-  @ApiOperation({ summary: 'Admin: seed/restore default home sections' })
+  @ApiOperation({ summary: 'Admin: sync home sections to the canonical list' })
   seed() {
     return this.websiteService.seedDefaults();
   }

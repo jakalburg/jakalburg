@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 
@@ -40,6 +41,9 @@ interface RecentOrderRow {
 
 interface RecentOrdersProps {
   orders: RecentOrderRow[];
+  /** While true the list shows placeholders — an empty list mid-fetch would
+   *  otherwise read as "this store has no orders". */
+  isLoading?: boolean;
 }
 
 const statusColors: Record<string, string> = {
@@ -80,6 +84,7 @@ function orderTotal(order: RecentOrderRow): number {
 
 export const RecentOrders = React.memo(function RecentOrders({
   orders,
+  isLoading = false,
 }: RecentOrdersProps) {
   return (
     <Card className="col-span-3">
@@ -90,7 +95,21 @@ export const RecentOrders = React.memo(function RecentOrders({
       <CardContent>
         <div className="space-y-4">
           <div className="space-y-4">
-            {orders.length === 0 ? (
+            {isLoading ? (
+              [0, 1, 2, 3, 4].map((i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between p-4 rounded-lg border border-border"
+                >
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-3 w-24" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                  <Skeleton className="h-6 w-20" />
+                </div>
+              ))
+            ) : orders.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 No recent orders found
               </div>

@@ -3,19 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm, type UseFormReturn } from "react-hook-form";
-import * as z from "zod";
 import {
-  Loader2,
-  Plus,
-  ImageOff,
-  Info,
-  Upload,
-  X,
-  Star,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
+  useForm,
+  type FieldErrors,
+  type UseFormReturn,
+} from "react-hook-form";
+import * as z from "zod";
+import { Loader2, Plus, Info, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -62,8 +56,11 @@ import { useFabrics } from "@/hooks/use-fabrics";
 import {
   ColorVariantCard,
   type ColorVariant,
-  type ImageItem,
 } from "@/components/products/color-variant-card";
+import {
+  ImageItemGallery,
+  type ImageItem,
+} from "@/components/products/image-item-gallery";
 import { cn } from "@/lib/utils";
 
 /** Server-side maximum page size — used where a picker renders every option. */
@@ -121,6 +118,11 @@ const productFormSchema = z
     fabric: z.string().min(1, "Fabric is required"),
     care: z.string().min(1, "Care instructions are required"),
     tagsText: z.string().optional(),
+    // The colour the product-level photos actually depict. Optional in the
+    // schema because whether it's required depends on state Zod can't see
+    // (whether any photos and any other colours exist) — enforced in `submit`.
+    baseColorName: z.string().optional(),
+    baseColorHex: z.string().optional(),
     isNew: z.boolean(),
     onSale: z.boolean(),
     essential: z.boolean(),
@@ -141,6 +143,42 @@ const productFormSchema = z
   );
 
 type ProductFormValues = z.infer<typeof productFormSchema>;
+
+/**
+ * Human labels for the "can't save yet" toast, keyed by schema field. Listed in
+ * the order the fields appear on the form so the toast reads top-to-bottom.
+ */
+const FIELD_LABELS: Record<string, string> = {
+  title: "Title",
+  gender: "Gender",
+  category: "Category",
+  price: "Price",
+  compareAtPrice: "Compare-at price",
+  stock: "Stock",
+  baseColorName: "Colour of the main photos",
+  description: "Description",
+  fabric: "Fabric",
+  care: "Care instructions",
+};
+
+const DEFAULT_SWATCH = "#000000";
+
+const toUrlList = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((x: unknown): x is string => typeof x === "string")
+    : [];
+
+/**
+ * Does this colour's gallery hold exactly the product-level photos, in order?
+ *
+ * That is the signature of the base colour this form writes on save, so on the
+ * way back in it can be lifted into the Images card instead of being listed a
+ * second time under Variants — otherwise every re-save would add a duplicate.
+ */
+const isBaseColor = (colorImages: string[], productImages: string[]): boolean =>
+  productImages.length > 0 &&
+  colorImages.length === productImages.length &&
+  colorImages.every((url, i) => url === productImages[i]);
 
 interface ProductFormProps {
   product?: Product;
@@ -221,9 +259,23 @@ export function ProductForm({
           .map((url: string) => ({ kind: "url" as const, url }))
       : [],
   );
+  // A leading colour whose gallery IS the product images is the base colour
+  // this form wrote last time: lift it into the Images card rather than showing
+  // it again as a variant. Anything else loads as a normal variant.
+  const loadedBaseColor = (() => {
+    const first = Array.isArray(p?.colors) ? p.colors[0] : undefined;
+    if (!first) return null;
+    return isBaseColor(toUrlList(first.images), toUrlList(p?.images))
+      ? {
+          name: typeof first.name === "string" ? first.name : "",
+          hex: typeof first.hex === "string" ? first.hex : DEFAULT_SWATCH,
+        }
+      : null;
+  })();
+
   const [colors, setColors] = useState<ColorVariant[]>(() =>
     Array.isArray(p?.colors)
-      ? p.colors.map((c: any) => ({
+      ? (loadedBaseColor ? p.colors.slice(1) : p.colors).map((c: any) => ({
           name: c?.name ?? "",
           hex: c?.hex ?? "#000000",
           images: Array.isArray(c?.images)
@@ -274,6 +326,8 @@ export function ProductForm({
       fabric: p?.fabric ?? "",
       care: p?.care ?? "",
       tagsText: Array.isArray(p?.tags) ? p.tags.join(", ") : "",
+      baseColorName: loadedBaseColor?.name ?? "",
+      baseColorHex: loadedBaseColor?.hex ?? DEFAULT_SWATCH,
       isNew: p?.isNew ?? false,
       onSale: p?.onSale ?? false,
       essential: p?.essential ?? false,
@@ -303,37 +357,9 @@ export function ProductForm({
   const updateColor = (i: number, patch: Partial<ColorVariant>) =>
     setColors((c) => c.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
 
-  const removeImage = (i: number) =>
-    setImages((imgs) => {
-      const target = imgs[i];
-      if (target?.kind === "file") URL.revokeObjectURL(target.preview);
-      return imgs.filter((_, idx) => idx !== i);
-    });
-
   // Image order IS the display order everywhere — images[0] is the primary /
-  // thumbnail. Admins reorder by dragging (desktop) or the ◀ ▶ / ★ controls
-  // (works on touch too, where native drag-and-drop doesn't fire).
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-
-  const moveImage = (from: number, to: number) =>
-    setImages((imgs) => {
-      if (
-        from === to ||
-        from < 0 ||
-        to < 0 ||
-        from >= imgs.length ||
-        to >= imgs.length
-      ) {
-        return imgs;
-      }
-      const next = [...imgs];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-
-  const makePrimary = (i: number) => moveImage(i, 0);
+  // thumbnail. Reordering, set-primary and removal all live in
+  // <ImageItemGallery>, which the per-colour strip shares.
 
   // Revoke any outstanding local previews on unmount to avoid leaking blobs.
   const imagesRef = useRef(images);
@@ -375,6 +401,81 @@ export function ProductForm({
       preview: URL.createObjectURL(file),
     }));
     setImages((imgs) => [...imgs, ...items]);
+  };
+
+  /**
+   * Validation failed, so `onSubmit` never runs and nothing is saved.
+   *
+   * This form is several screens tall, so the offending field is usually well
+   * outside the viewport when the admin reaches the Create button at the
+   * bottom — leaving the button looking simply dead. Name what's wrong, then
+   * take them to the first one.
+   */
+  const onInvalid = (errors: FieldErrors<ProductFormValues>) => {
+    const labels = Object.keys(FIELD_LABELS).filter((name) => name in errors);
+    // Any key the map doesn't cover (a new schema field) still gets counted.
+    const unmapped = Object.keys(errors).filter(
+      (name) => !(name in FIELD_LABELS),
+    );
+    const named = [...labels.map((n) => FIELD_LABELS[n]), ...unmapped];
+
+    toast.error(
+      named.length === 1
+        ? `${named[0]} needs fixing before you can save`
+        : `${named.length} fields need fixing before you can save`,
+      { description: named.join(" · ") },
+    );
+
+    // Wait for the messages to render, then jump to the FIRST one in document
+    // order — which is the first one visually, whatever control it belongs to.
+    // Targeting by field name wouldn't do: the Selects don't expose one, so
+    // gender/category would be silently skipped.
+    requestAnimationFrame(() => {
+      const message = document.querySelector('[data-slot="form-message"]');
+      const target = message?.closest('[data-slot="form-item"]') ?? message;
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
+
+  /**
+   * The product photos stand in for any colour that has none of its own
+   * (storefront: `colorObj?.images?.length ? colorObj.images : product.images`),
+   * and the product page preselects the FIRST colour. So once a second colour
+   * exists, unlabelled product photos are actively wrong — add "Navy" and it
+   * shows the ivory shots. Naming them is what stops that.
+   *
+   * Only required once both exist: photos to attribute, and another colour to
+   * confuse them with. A single-colour product has no ambiguity to resolve.
+   */
+  const baseColorRequired = images.length > 0 && colors.length > 0;
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    // Run the schema first so a missing title and a missing base colour are
+    // reported in the same pass rather than one dialog at a time.
+    const schemaValid = await form.trigger();
+    const missingBaseColor =
+      baseColorRequired && !form.getValues("baseColorName")?.trim();
+
+    if (missingBaseColor) {
+      form.setError("baseColorName", {
+        type: "manual",
+        message: "Name the colour these photos show",
+      });
+    }
+
+    if (!schemaValid || missingBaseColor) {
+      onInvalid({
+        ...form.formState.errors,
+        ...(missingBaseColor
+          ? { baseColorName: { type: "manual", message: "Required" } }
+          : {}),
+      });
+      return;
+    }
+
+    await onSubmit(form.getValues());
   };
 
   const onSubmit = async (data: ProductFormValues) => {
@@ -439,18 +540,59 @@ export function ProductForm({
     // Build colours with their resolved images. Sold-out is clamped to the
     // colour's own sizes; blank numbers are omitted so the server stores null
     // (→ the colour inherits the product-level default).
-    const cleanColors = colors
-      .map((c, i) => ({
-        name: c.name.trim(),
-        hex: c.hex.trim(),
-        images: colorImageUrls[i],
-        sizes: c.sizes,
-        soldOutSizes: c.soldOutSizes.filter((s) => c.sizes.includes(s)),
-        price: typeof c.price === "number" ? c.price : undefined,
-        compareAtPrice:
-          typeof c.compareAtPrice === "number" ? c.compareAtPrice : undefined,
-        stock: typeof c.stock === "number" ? c.stock : undefined,
-      }))
+    const variantColors = colors.map((c, i) => ({
+      name: c.name.trim(),
+      hex: c.hex.trim(),
+      images: colorImageUrls[i],
+      sizes: c.sizes,
+      soldOutSizes: c.soldOutSizes.filter((s) => c.sizes.includes(s)),
+      price: typeof c.price === "number" ? c.price : undefined,
+      compareAtPrice:
+        typeof c.compareAtPrice === "number" ? c.compareAtPrice : undefined,
+      stock: typeof c.stock === "number" ? c.stock : undefined,
+    }));
+
+    // The named product photos become a colour in their own right, first in the
+    // list so the storefront preselects it. Its sizes/price/stock are left
+    // empty on purpose: blank means "inherit the product-level value", which is
+    // exactly what these photos represented before they had a name.
+    const baseColorName = data.baseColorName?.trim() ?? "";
+    const baseKey = baseColorName.toLowerCase();
+
+    // Naming the photos after a colour that's already listed below is the
+    // normal case when labelling an existing product — every colour in the
+    // seeded catalogue has an empty gallery and leans on these photos. Fold the
+    // two into one entry: the photos come from here, but that colour's own
+    // sizes/price/stock overrides are carried across rather than dropped.
+    const twin = baseKey
+      ? variantColors.find((c) => c.name.toLowerCase() === baseKey)
+      : undefined;
+
+    const baseColor =
+      baseColorName && cleanImages.length > 0
+        ? [
+            {
+              ...(twin ?? {
+                sizes: [] as string[],
+                soldOutSizes: [] as string[],
+                price: undefined,
+                compareAtPrice: undefined,
+                stock: undefined,
+              }),
+              name: baseColorName,
+              hex: (data.baseColorHex || DEFAULT_SWATCH).trim(),
+              images: cleanImages,
+            },
+          ]
+        : [];
+
+    // Only drop the twin when the base entry actually replaced it — with no
+    // photos there is no base entry, and filtering would delete the colour.
+    const absorbed = baseColor.length > 0 ? twin : undefined;
+    const cleanColors = [
+      ...baseColor,
+      ...variantColors.filter((c) => c !== absorbed),
+    ]
       .filter((c) => c.name.length > 0)
       .map((c, i) => ({ ...c, position: i }));
 
@@ -565,7 +707,7 @@ export function ProductForm({
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 pb-24">
+      <form onSubmit={submit} className="space-y-6 pb-24">
         {dealMode && (
           <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
             <Info className="mt-0.5 h-4 w-4 shrink-0" />
@@ -793,135 +935,63 @@ export function ProductForm({
             {images.length === 0 && (
               <p className="text-sm text-muted-foreground">No images yet.</p>
             )}
+
+            {/* Which colour these photos actually show. Saved as the product's
+                first colour, so the storefront opens on it. */}
             {images.length > 0 && (
-              <div className="flex flex-wrap gap-3">
-                {images.map((img, i) => {
-                  const src = img.kind === "url" ? img.url : img.preview;
-                  const isPrimary = i === 0;
-                  const isLast = i === images.length - 1;
-                  return (
-                    <div
-                      key={i}
-                      draggable
-                      onDragStart={(e) => {
-                        setDragIndex(i);
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "move";
-                        if (dragOverIndex !== i) setDragOverIndex(i);
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        if (dragIndex !== null) moveImage(dragIndex, i);
-                        setDragIndex(null);
-                        setDragOverIndex(null);
-                      }}
-                      onDragEnd={() => {
-                        setDragIndex(null);
-                        setDragOverIndex(null);
-                      }}
-                      className={cn(
-                        "group relative h-28 w-28 shrink-0 cursor-grab overflow-hidden rounded-md border bg-muted transition active:cursor-grabbing",
-                        dragIndex === i && "opacity-50",
-                        dragOverIndex === i &&
-                          dragIndex !== i &&
-                          "ring-2 ring-primary ring-offset-1",
-                      )}
-                    >
-                      {src.trim() ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={src}
-                          alt=""
-                          draggable={false}
-                          className="h-full w-full object-cover"
-                          onError={(e) => {
-                            e.currentTarget.style.display = "none";
-                          }}
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                          <ImageOff className="h-5 w-5" />
-                        </div>
-                      )}
-
-                      {/* Position (1-based); the primary photo is always #1. */}
-                      <span className="absolute left-1 top-1 z-20 rounded bg-background/90 px-1.5 text-[10px] font-semibold text-foreground shadow ring-1 ring-black/10">
-                        {i + 1}
-                      </span>
-
-                      {/* Remove */}
-                      <button
-                        type="button"
-                        draggable={false}
-                        onClick={() => removeImage(i)}
-                        aria-label="Remove image"
-                        className="absolute right-1 top-1 z-20 flex h-6 w-6 items-center justify-center rounded-full bg-background/90 text-foreground shadow ring-1 ring-black/10 transition hover:bg-destructive hover:text-destructive-foreground"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-
-                      {/* Reorder / set-primary controls. The backdrop is
-                          pointer-events-none so a drag still starts anywhere on
-                          the tile; each button re-enables pointer events. Shown
-                          on hover (desktop) and always on touch. */}
-                      <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-1 bg-black/45 opacity-100 transition-opacity [@media(hover:hover)]:opacity-0 group-hover:opacity-100">
-                        <button
-                          type="button"
-                          draggable={false}
-                          onClick={() => moveImage(i, i - 1)}
-                          disabled={isPrimary}
-                          aria-label="Move left"
-                          title="Move left"
-                          className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full bg-background/95 text-foreground shadow ring-1 ring-black/10 transition hover:bg-primary hover:text-primary-foreground disabled:opacity-40"
-                        >
-                          <ChevronLeft className="h-4 w-4" />
-                        </button>
-                        {!isPrimary && (
-                          <button
-                            type="button"
-                            draggable={false}
-                            onClick={() => makePrimary(i)}
-                            aria-label="Set as primary"
-                            title="Set as primary"
-                            className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full bg-background/95 text-foreground shadow ring-1 ring-black/10 transition hover:bg-primary hover:text-primary-foreground"
-                          >
-                            <Star className="h-4 w-4" />
-                          </button>
+              <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-start">
+                <FormField
+                  control={form.control}
+                  name="baseColorName"
+                  render={({ field }) => (
+                    <FormItem className="flex-1">
+                      <FormLabel>
+                        Colour of these photos
+                        {baseColorRequired && (
+                          <span className="text-destructive"> *</span>
                         )}
-                        <button
-                          type="button"
-                          draggable={false}
-                          onClick={() => moveImage(i, i + 1)}
-                          disabled={isLast}
-                          aria-label="Move right"
-                          title="Move right"
-                          className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-full bg-background/95 text-foreground shadow ring-1 ring-black/10 transition hover:bg-primary hover:text-primary-foreground disabled:opacity-40"
-                        >
-                          <ChevronRight className="h-4 w-4" />
-                        </button>
-                      </div>
-
-                      {/* Pending upload */}
-                      {img.kind === "file" && (
-                        <span className="absolute bottom-1 left-1 z-20 rounded bg-amber-500/90 px-1 text-[9px] font-medium text-white">
-                          Pending
-                        </span>
-                      )}
-
-                      {/* Primary marker */}
-                      {isPrimary && (
-                        <span className="absolute bottom-1 right-1 z-20 flex items-center gap-0.5 rounded bg-primary/90 px-1 text-[9px] font-medium text-primary-foreground">
-                          <Star className="h-2.5 w-2.5 fill-current" /> Primary
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          value={field.value ?? ""}
+                          placeholder="e.g. Ivory"
+                          disabled={submitting}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {baseColorRequired
+                          ? "Required once you add another colour — these photos stand in for any colour without its own, so they need to say which one they are."
+                          : "Optional. Naming them adds them as this product's first colour."}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="baseColorHex"
+                  render={({ field }) => (
+                    <FormItem className="sm:w-28">
+                      <FormLabel>Swatch</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="color"
+                          {...field}
+                          value={field.value || DEFAULT_SWATCH}
+                          disabled={submitting}
+                          className="h-9 w-full cursor-pointer p-1"
+                          aria-label="Swatch for these photos"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
             )}
+
+            <ImageItemGallery images={images} onChange={setImages} size="md" />
             <input
               ref={fileInputRef}
               type="file"
@@ -958,11 +1028,16 @@ export function ProductForm({
                 override the product defaults, and anything left blank inherits
                 them. */}
             <div className="space-y-3">
-              <Label>Colours</Label>
+              <Label>Additional colours</Label>
+              <p className="text-xs text-muted-foreground">
+                The photos in the Images card above are this product&apos;s
+                first colour. Add the others here — each needs its own photos,
+                or it falls back to showing those.
+              </p>
               {colors.length === 0 && (
                 <p className="text-sm text-muted-foreground">
-                  No colours yet. Add one to give it its own photos, sizes or
-                  price.
+                  No other colours yet. Add one to give it its own photos, sizes
+                  or price.
                 </p>
               )}
               {colors.map((c, i) => (

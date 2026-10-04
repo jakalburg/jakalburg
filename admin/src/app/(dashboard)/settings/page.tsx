@@ -5,7 +5,6 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Store,
-  User,
   Bell,
   CreditCard,
   Truck,
@@ -15,7 +14,6 @@ import {
   Timer,
 } from "lucide-react";
 
-import { ProfileTab } from "@/components/settings/ProfileTab";
 import { StoreTab } from "@/components/settings/StoreTab";
 import { PaymentsTab } from "@/components/settings/PaymentsTab";
 import { DeliveryTab } from "@/components/settings/DeliveryTab";
@@ -23,7 +21,7 @@ import { StorageTab } from "@/components/settings/StorageTab";
 import { NotificationsTab } from "@/components/settings/NotificationsTab";
 import { EmailTab } from "@/components/settings/EmailTab";
 import { OrdersTab } from "@/components/settings/OrdersTab";
-import { WebsiteCountdownTab } from "@/components/settings/WebsiteCountdownTab";
+import { MaintenanceTab } from "@/components/settings/MaintenanceTab";
 import { SettingsPageShell } from "@/components/settings/settings-layout";
 
 function SettingsContent() {
@@ -32,7 +30,6 @@ function SettingsContent() {
   const searchParams = useSearchParams();
   const tabFromUrl = searchParams.get("tab");
   const validTabs = [
-    "profile",
     "store",
     "orders",
     "payments",
@@ -40,10 +37,10 @@ function SettingsContent() {
     "media",
     "notifications",
     "email",
-    "countdown",
+    "maintenance",
   ];
   const [activeTab, setActiveTab] = useState(
-    validTabs.includes(tabFromUrl || "") ? tabFromUrl! : "profile",
+    validTabs.includes(tabFromUrl || "") ? tabFromUrl! : "store",
   );
 
   const handleTabChange = (value: string) => {
@@ -59,15 +56,11 @@ function SettingsContent() {
       description="Manage your account settings and set e-mail preferences."
     >
       <Tabs
-        defaultValue="profile"
+        defaultValue="store"
         value={activeTab}
         onValueChange={handleTabChange}
       >
         <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto p-1 lg:w-[950px]">
-          <TabsTrigger value="profile">
-            <User className="w-4 h-4 mr-2" />
-            Profile
-          </TabsTrigger>
           <TabsTrigger value="store">
             <Store className="w-4 h-4 mr-2" />
             Store
@@ -96,17 +89,13 @@ function SettingsContent() {
             <Mail className="w-4 h-4 mr-2" />
             Email
           </TabsTrigger>
-          <TabsTrigger value="countdown">
+          <TabsTrigger value="maintenance">
             <Timer className="w-4 h-4 mr-2" />
-            Countdown
+            Maintenance
           </TabsTrigger>
         </TabsList>
 
         <div className="mt-6">
-          <TabsContent value="profile" className="space-y-4">
-            <ProfileTab />
-          </TabsContent>
-
           <TabsContent value="store" className="space-y-4">
             <StoreTab />
           </TabsContent>
@@ -135,8 +124,8 @@ function SettingsContent() {
             <OrdersTab />
           </TabsContent>
 
-          <TabsContent value="countdown" className="space-y-4">
-            <WebsiteCountdownTab />
+          <TabsContent value="maintenance" className="space-y-4">
+            <MaintenanceTab />
           </TabsContent>
         </div>
       </Tabs>

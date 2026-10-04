@@ -26,107 +26,36 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { pagesService } from "@/services/pages.service";
+import {
+  pagesService,
+  FaqSection,
+  PageDto,
+} from "@/services/pages.service";
 import "react-quill-new/dist/quill.snow.css";
-import { Loader2, Plus, Trash2 } from "lucide-react";
-import useAxiosAuth from "@/hooks/use-axios-auth";
+import { ChevronDown, ChevronUp, Loader2, Plus, Trash2 } from "lucide-react";
 
-// Dynamic import for React Quill to avoid SSR issues
+// Quill touches the DOM on import, so keep it off the server render.
 const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
 
-type FaqItem = {
-  question: string;
-  answer: string;
-};
+// The one slug whose body is structured Q&A rather than rich text.
+const FAQ_SLUG = "faq";
 
-const emptyFaqItem = (): FaqItem => ({ question: "", answer: "" });
-
-const escapeHtml = (value: string) =>
-  value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-
-const plainTextToHtml = (value: string) =>
-  escapeHtml(value.trim()).replace(/\n/g, "<br />");
+const emptyItem = () => ({ question: "", answer: "" });
+const emptySection = (): FaqSection => ({
+  heading: "",
+  items: [emptyItem()],
+});
 
 const getErrorMessage = (error: unknown) => {
   const apiError = error as {
     response?: { data?: { message?: unknown } };
     message?: unknown;
   };
-
-  return (
-    apiError.response?.data?.message ||
-    apiError.message ||
-    "Something went wrong. Please try again."
-  );
-};
-
-const buildFaqContent = (items: FaqItem[]) => {
-  const faqMarkup = items
-    .map((item) => ({
-      question: item.question.trim(),
-      answer: item.answer.trim(),
-    }))
-    .filter((item) => item.question && item.answer)
-    .map(
-      (item) => `
-          <div class="faq-page__item">
-            <h3>${escapeHtml(item.question)}</h3>
-            <p>${plainTextToHtml(item.answer)}</p>
-          </div>`,
-    )
-    .join("");
-
-  return `
-        <div class="faq-page">
-          
-          <p>Find answers to common questions about our jewellery, orders, shipping, and more.</p>
-          ${faqMarkup}
-        </div>
-        `;
-};
-
-const extractFaqItems = (content = ""): FaqItem[] => {
-  if (typeof window === "undefined" || !content) {
-    return [emptyFaqItem()];
-  }
-
-  const template = document.createElement("template");
-  template.innerHTML = content;
-  const faqContainer =
-    template.content.querySelector(".faq-page") || template.content;
-  const headings = Array.from(faqContainer.querySelectorAll("h3"));
-
-  const items = headings
-    .map((heading) => {
-      const answerParts: string[] = [];
-      let sibling = heading.nextElementSibling;
-
-      while (sibling && sibling.tagName.toLowerCase() !== "h3") {
-        if (!sibling.classList.contains("faq-page__item")) {
-          answerParts.push((sibling.textContent || "").trim());
-        }
-        sibling = sibling.nextElementSibling;
-      }
-
-      const nestedAnswer = heading.parentElement?.classList.contains(
-        "faq-page__item",
-      )
-        ? heading.parentElement.querySelector("p")?.textContent || ""
-        : "";
-
-      return {
-        question: (heading.textContent || "").trim(),
-        answer: (nestedAnswer || answerParts.join("\n")).trim(),
-      };
-    })
-    .filter((item) => item.question || item.answer);
-
-  return items.length ? items : [emptyFaqItem()];
+  const raw = apiError.response?.data?.message || apiError.message;
+  if (Array.isArray(raw)) return raw.join(", ");
+  return typeof raw === "string"
+    ? raw
+    : "Something went wrong. Please try again.";
 };
 
 const formSchema = z.object({
@@ -138,17 +67,23 @@ const formSchema = z.object({
       /^[a-z0-9-]+$/,
       "Slug must only contain lowercase letters, numbers, and hyphens",
     ),
-  content: z.string().min(10, "Content must be at least 10 characters"),
+  content: z.string(),
   status: z.enum(["active", "inactive"]),
 });
 
+type FormValues = z.infer<typeof formSchema>;
+
 interface PageFormProps {
-  initialData?: z.infer<typeof formSchema> & { id?: string };
+  initialData?: FormValues & { id?: string; faqSections?: FaqSection[] | null };
   isEdit?: boolean;
   extraFields?: ReactNode;
-  transformValues?: (
-    values: z.infer<typeof formSchema>,
-  ) => Promise<z.infer<typeof formSchema>> | z.infer<typeof formSchema>;
+  transformValues?: (values: FormValues) => Promise<FormValues> | FormValues;
+  /**
+   * Saved alongside the page, for content a page owns that doesn't live on the
+   * Page record — the About hero image, for instance. Runs before the page
+   * write, so if it throws nothing is saved and the user stays on the form.
+   */
+  extraSave?: () => Promise<void>;
 }
 
 export default function PageForm({
@@ -156,19 +91,22 @@ export default function PageForm({
   isEdit = false,
   extraFields,
   transformValues,
+  extraSave,
 }: PageFormProps) {
   const router = useRouter();
-  const api = useAxiosAuth();
   const [isLoading, setIsLoading] = useState(false);
-  const [faqItems, setFaqItems] = useState<FaqItem[]>(() =>
-    initialData?.slug === "faqs"
-      ? extractFaqItems(initialData.content)
-      : [emptyFaqItem()],
+
+  // FAQ content is held as structured state, NOT serialised into `content`
+  // HTML the way the kaybykhushie reference does — so editing can't mangle it.
+  const [sections, setSections] = useState<FaqSection[]>(() =>
+    initialData?.faqSections?.length
+      ? initialData.faqSections
+      : [emptySection()],
   );
 
-  const form = useForm<z.infer<typeof formSchema>>({
+  const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: initialData || {
+    defaultValues: initialData ?? {
       title: "",
       slug: "",
       content: "",
@@ -177,74 +115,123 @@ export default function PageForm({
   });
 
   useEffect(() => {
-    if (initialData) {
-      form.reset(initialData);
-      if (initialData.slug === "faqs") {
-        setFaqItems(extractFaqItems(initialData.content));
-      }
-    }
+    if (!initialData) return;
+    form.reset({
+      title: initialData.title,
+      slug: initialData.slug,
+      content: initialData.content,
+      status: initialData.status,
+    });
+    if (initialData.faqSections?.length) setSections(initialData.faqSections);
   }, [form, initialData]);
 
-  const watchedSlug = form.watch("slug");
-  const isFaqPage = watchedSlug === "faqs";
+  const isFaqPage = form.watch("slug") === FAQ_SLUG;
 
-  useEffect(() => {
-    if (isFaqPage) {
-      form.setValue("content", buildFaqContent(faqItems), {
-        shouldValidate: true,
-      });
-    }
-  }, [faqItems, form, isFaqPage]);
-
-  const updateFaqItem = (
-    index: number,
-    field: keyof FaqItem,
-    value: string,
-  ) => {
-    setFaqItems((current) =>
-      current.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, [field]: value } : item,
+  // ---- FAQ section helpers -------------------------------------------------
+  const patchSection = (index: number, patch: Partial<FaqSection>) =>
+    setSections((current) =>
+      current.map((section, i) =>
+        i === index ? { ...section, ...patch } : section,
       ),
     );
-  };
 
-  const addFaqItem = () => {
-    setFaqItems((current) => [...current, emptyFaqItem()]);
-  };
+  const moveSection = (index: number, delta: number) =>
+    setSections((current) => {
+      const target = index + delta;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
 
-  const removeFaqItem = (index: number) => {
-    setFaqItems((current) =>
+  const removeSection = (index: number) =>
+    setSections((current) =>
       current.length === 1
-        ? [emptyFaqItem()]
-        : current.filter((_, itemIndex) => itemIndex !== index),
+        ? [emptySection()]
+        : current.filter((_, i) => i !== index),
     );
+
+  const patchItem = (
+    sectionIndex: number,
+    itemIndex: number,
+    patch: Partial<{ question: string; answer: string }>,
+  ) =>
+    setSections((current) =>
+      current.map((section, i) =>
+        i === sectionIndex
+          ? {
+              ...section,
+              items: section.items.map((item, j) =>
+                j === itemIndex ? { ...item, ...patch } : item,
+              ),
+            }
+          : section,
+      ),
+    );
+
+  const addItem = (sectionIndex: number) =>
+    patchSection(sectionIndex, {
+      items: [...sections[sectionIndex].items, emptyItem()],
+    });
+
+  const removeItem = (sectionIndex: number, itemIndex: number) => {
+    const items = sections[sectionIndex].items;
+    patchSection(sectionIndex, {
+      items:
+        items.length === 1
+          ? [emptyItem()]
+          : items.filter((_, j) => j !== itemIndex),
+    });
   };
 
-  async function onSubmit(values: z.infer<typeof formSchema>) {
+  /** Drops blank headings and blank Q&A rows before saving. */
+  const cleanSections = (): FaqSection[] =>
+    sections
+      .map((section) => ({
+        heading: section.heading.trim(),
+        items: section.items
+          .map((item) => ({
+            question: item.question.trim(),
+            answer: item.answer.trim(),
+          }))
+          .filter((item) => item.question && item.answer),
+      }))
+      .filter((section) => section.heading && section.items.length > 0);
+
+  async function onSubmit(values: FormValues) {
+    const faqSections = isFaqPage ? cleanSections() : undefined;
+
+    if (isFaqPage && faqSections!.length === 0) {
+      toast.error("Add at least one heading with a question and answer");
+      return;
+    }
+    if (!isFaqPage && values.content.trim().length < 10) {
+      form.setError("content", {
+        message: "Content must be at least 10 characters",
+      });
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const pageValues = isFaqPage
-        ? { ...values, content: buildFaqContent(faqItems) }
-        : values;
-      const finalValues = transformValues
-        ? await transformValues(pageValues)
-        : pageValues;
+      if (extraSave) await extraSave();
+
+      const base = transformValues ? await transformValues(values) : values;
+      const payload: PageDto = { ...base, ...(faqSections ? { faqSections } : {}) };
 
       if (isEdit && initialData?.id) {
-        await pagesService(api).update(initialData.id, finalValues);
+        await pagesService.update(initialData.id, payload);
         toast.success("Page updated successfully");
       } else {
-        await pagesService(api).create(finalValues);
+        await pagesService.create(payload);
         toast.success("Page created successfully");
       }
       router.push("/website/pages");
       router.refresh();
     } catch (error) {
       console.error(error);
-      const message = getErrorMessage(error);
       toast.error("Failed to save page", {
-        description:
-          typeof message === "string" ? message : "Please try again.",
+        description: getErrorMessage(error),
       });
     } finally {
       setIsLoading(false);
@@ -270,7 +257,6 @@ export default function PageForm({
                         onChange={(e) => {
                           field.onChange(e);
                           if (!isEdit) {
-                            // Auto-generate slug from title
                             const slug = e.target.value
                               .toLowerCase()
                               .replace(/[^a-z0-9]+/g, "-")
@@ -294,6 +280,9 @@ export default function PageForm({
                     <FormControl>
                       <Input placeholder="page-slug" {...field} />
                     </FormControl>
+                    <p className="text-xs text-muted-foreground">
+                      This is the storefront URL — /{field.value || "page-slug"}
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -317,6 +306,9 @@ export default function PageForm({
                       <SelectItem value="inactive">Inactive</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Inactive pages are hidden from the storefront.
+                  </p>
                   <FormMessage />
                 </FormItem>
               )}
@@ -324,73 +316,133 @@ export default function PageForm({
 
             {isFaqPage ? (
               <div className="space-y-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <h3 className="text-lg font-semibold">FAQ Items</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Add each question and answer separately.
-                    </p>
-                  </div>
+                <div>
+                  <h3 className="text-lg font-semibold">FAQ sections</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Each heading becomes a group on the storefront, with its
+                    questions listed underneath it.
+                  </p>
                 </div>
 
-                {faqItems.map((item, index) => (
-                  <Card key={index}>
+                {sections.map((section, sectionIndex) => (
+                  <Card key={sectionIndex} className="border-muted">
                     <CardContent className="space-y-4 pt-6">
-                      <div className="flex items-center justify-between">
-                        <p className="font-medium">FAQ {index + 1}</p>
+                      <div className="flex items-end gap-2">
+                        <div className="flex-1 space-y-2">
+                          <FormLabel>Heading</FormLabel>
+                          <Input
+                            value={section.heading}
+                            onChange={(e) =>
+                              patchSection(sectionIndex, {
+                                heading: e.target.value,
+                              })
+                            }
+                            placeholder="e.g. Orders"
+                          />
+                        </div>
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
-                          onClick={() => removeFaqItem(index)}
-                          aria-label={`Remove FAQ ${index + 1}`}
+                          onClick={() => moveSection(sectionIndex, -1)}
+                          disabled={sectionIndex === 0}
+                          aria-label="Move section up"
+                        >
+                          <ChevronUp className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => moveSection(sectionIndex, 1)}
+                          disabled={sectionIndex === sections.length - 1}
+                          aria-label="Move section down"
+                        >
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeSection(sectionIndex)}
+                          aria-label="Remove section"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
-                          <FormLabel>Question</FormLabel>
-                          <Input
-                            value={item.question}
-                            onChange={(event) =>
-                              updateFaqItem(
-                                index,
-                                "question",
-                                event.target.value,
-                              )
-                            }
-                            placeholder="Enter question"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <FormLabel>Answer</FormLabel>
-                          <Textarea
-                            value={item.answer}
-                            onChange={(event) =>
-                              updateFaqItem(index, "answer", event.target.value)
-                            }
-                            placeholder="Enter answer"
-                            rows={3}
-                          />
-                        </div>
+
+                      <div className="space-y-3 border-l-2 pl-4">
+                        {section.items.map((item, itemIndex) => (
+                          <div
+                            key={itemIndex}
+                            className="grid gap-3 md:grid-cols-[1fr_1fr_auto]"
+                          >
+                            <div className="space-y-2">
+                              <FormLabel className="text-xs">
+                                Question {itemIndex + 1}
+                              </FormLabel>
+                              <Input
+                                value={item.question}
+                                onChange={(e) =>
+                                  patchItem(sectionIndex, itemIndex, {
+                                    question: e.target.value,
+                                  })
+                                }
+                                placeholder="Enter question"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <FormLabel className="text-xs">Answer</FormLabel>
+                              <Textarea
+                                value={item.answer}
+                                onChange={(e) =>
+                                  patchItem(sectionIndex, itemIndex, {
+                                    answer: e.target.value,
+                                  })
+                                }
+                                placeholder="Enter answer"
+                                rows={3}
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="self-end"
+                              onClick={() => removeItem(sectionIndex, itemIndex)}
+                              aria-label={`Remove question ${itemIndex + 1}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => addItem(sectionIndex)}
+                        >
+                          <Plus className="mr-2 h-4 w-4" />
+                          Add question
+                        </Button>
                       </div>
                     </CardContent>
                   </Card>
                 ))}
 
                 <div className="flex justify-end">
-                  <Button type="button" variant="outline" onClick={addFaqItem}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      setSections((current) => [...current, emptySection()])
+                    }
+                  >
                     <Plus className="mr-2 h-4 w-4" />
-                    Add FAQ
+                    Add heading
                   </Button>
                 </div>
-
-                <FormField
-                  control={form.control}
-                  name="content"
-                  render={({ field }) => <input type="hidden" {...field} />}
-                />
               </div>
             ) : (
               <FormField
@@ -400,7 +452,7 @@ export default function PageForm({
                   <FormItem>
                     <FormLabel>Content</FormLabel>
                     <FormControl>
-                      <div className="h-96 mb-12">
+                      <div className="mb-12 h-96">
                         <ReactQuill
                           theme="snow"
                           value={field.value}

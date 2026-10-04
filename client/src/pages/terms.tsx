@@ -1,24 +1,37 @@
-import SEO from "@/components/seo";
-import { SiteLayout } from "@/components/layout/SiteLayout";
+import { PolicyPage } from "@/components/common/policy-page";
+import { StaticPage, fetchStaticPage } from "@/hooks/useStaticPage";
 
-export default function TermsPage() {
+const SLUG = "terms";
+
+// Copy shown if the API is unreachable or an admin deactivates the page —
+// matches what this route rendered before it became editable.
+const FALLBACK = [
+  "<p>This is a demonstration site. No transactions are processed and no goods are shipped. Use the site to explore the design and interaction only.</p>",
+  "<p>All imagery is used under royalty-free licence and is representative rather than of specific product samples.</p>",
+].join("");
+
+export async function getStaticProps() {
+  return {
+    props: { initialPage: await fetchStaticPage(SLUG) },
+    revalidate: 60,
+  };
+}
+
+export default function TermsPage({
+  initialPage,
+}: {
+  initialPage: StaticPage | null;
+}) {
   return (
-    <>
-      <SEO
-        title="Terms — Jakalburg"
-        description="Terms of use for the Jakalburg demo storefront."
-        canonicalPath="/terms"
-      />
-      <SiteLayout>
-        <section className="container-vh max-w-3xl py-16">
-          <p className="eyebrow text-mute-text">Legal</p>
-          <h1 className="mt-3 text-3xl md:text-4xl">Terms of use.</h1>
-          <div className="prose mt-8 max-w-none text-sm text-muted-foreground">
-            <p>This is a demonstration site. No transactions are processed and no goods are shipped. Use the site to explore the design and interaction only.</p>
-            <p className="mt-4">All imagery is used under royalty-free licence and is representative rather than of specific product samples.</p>
-          </div>
-        </section>
-      </SiteLayout>
-    </>
+    <PolicyPage
+      slug={SLUG}
+      eyebrow="Legal"
+      seoTitle="Terms — Jakalburg"
+      seoDescription="Terms of use for the Jakalburg demo storefront."
+      canonicalPath="/terms"
+      fallbackTitle="Terms of use."
+      fallbackContent={FALLBACK}
+      initialPage={initialPage}
+    />
   );
 }

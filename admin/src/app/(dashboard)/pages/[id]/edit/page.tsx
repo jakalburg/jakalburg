@@ -1,111 +1,41 @@
 "use client";
 
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { usePage } from "@/hooks/use-pages";
-import { Button } from "@/components/ui/button";
-import Loader from "@/components/ui/loader";
 import PageForm from "@/components/pages/page-form";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import Loader from "@/components/ui/loader";
 import { ImageUpload } from "@/components/products/image-upload";
-import useAxiosAuth from "@/hooks/use-axios-auth";
+import { usePage } from "@/hooks/use-pages";
+import { useGetAbout, useUpdateAbout } from "@/hooks/use-website-pages";
 import { uploadService } from "@/services/upload.service";
+import { realApi } from "@/lib/api/real-axios";
 
-type FounderImageItem = {
-  id: string;
-  url: string;
-  file?: File;
-  isPrimary: boolean;
-};
+/** The About page's hero image lives on the WebsiteAbout singleton, not the
+ *  Page record — rich text can't carry a full-bleed image. */
+const ABOUT_SLUG = "about";
 
-const founderImageMarkup = (imageUrl: string) =>
-  imageUrl
-    ? `<div class="founder-page__media"><img src="${imageUrl}" alt="Khushie - Founder of KAY by Khushie" /></div>`
-    : "";
+type HeroImage = { id: string; url: string; file?: File; isPrimary: boolean };
 
-const extractFounderImage = (content: string) => {
-  const founderImageMatch = content.match(
-    /<div[^>]*class=["'][^"']*founder-page__media[^"']*["'][^>]*>[\s\S]*?<img[^>]+src=['"]([^'"]+)['"][^>]*>[\s\S]*?<\/div>/i,
-  );
-
-  if (founderImageMatch?.[1]) {
-    return founderImageMatch[1];
-  }
-
-  const fallbackImageMatch = content.match(
-    /<img[^>]+src=['"]([^'"]+)['"][^>]*>/i,
-  );
-  return fallbackImageMatch?.[1] || "";
-};
-
-const replaceFounderImage = (content: string, imageUrl: string) => {
-  const mediaBlockPattern =
-    /<div[^>]*class=["'][^"']*founder-page__media[^"']*["'][^>]*>[\s\S]*?<\/div>/i;
-  const imageBlock = founderImageMarkup(imageUrl);
-
-  if (mediaBlockPattern.test(content)) {
-    if (!imageUrl) {
-      return content.replace(mediaBlockPattern, "");
-    }
-
-    return content.replace(mediaBlockPattern, imageBlock);
-  }
-
-  if (!imageUrl) {
-    return content;
-  }
-
-  if (
-    /<div[^>]*class=["'][^"']*founder-page__hero[^"']*["'][^>]*>/i.test(content)
-  ) {
-    return content.replace(
-      /<div[^>]*class=["'][^"']*founder-page__hero[^"']*["'][^>]*>/i,
-      `$&${imageBlock}`,
-    );
-  }
-
-  if (/<div[^>]*class=["'][^"']*founder-page[^"']*["'][^>]*>/i.test(content)) {
-    return (
-      content.replace(
-        /<div[^>]*class=["'][^"']*founder-page[^"']*["'][^>]*>/i,
-        `$&<div class="founder-page__hero">${imageBlock}<div class="founder-page__content">`,
-      ) + "</div></div>"
-    );
-  }
-
-  return `
-    <div class="founder-page">
-      <div class="founder-page__hero">
-        ${imageBlock}
-        <div class="founder-page__content">
-          ${content}
-        </div>
-      </div>
-    </div>
-  `;
-};
-
-const removeFounderImageBlock = (content: string) =>
-  content
-    .replace(
-      /<div[^>]*class=["'][^"']*founder-page__media[^"']*["'][^>]*>[\s\S]*?<\/div>/i,
-      "",
-    )
-    .replace(/<img[^>]+src=['"]([^'"]+)['"][^>]*>/i, "");
-
-const unwrapAboutBrandEssence = (content: string) =>
-  content.replace(
-    /<div[^>]*class=["'][^"']*about-page__brand-essence[^"']*["'][^>]*>\s*<div[^>]*class=["'][^"']*about-page__brand-essence-content[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*(?:<div[^>]*class=["'][^"']*about-page__brand-essence-media[^"']*["'][^>]*>[\s\S]*?<\/div>)?\s*<\/div>/i,
-    "$1",
-  );
-
-const removeAboutBrandImageBlock = (content: string) =>
-  unwrapAboutBrandEssence(content).replace(
-    /<div[^>]*class=["'][^"']*about-page__brand-essence-media[^"']*["'][^>]*>[\s\S]*?<\/div>/i,
-    "",
-  );
-
+/**
+ * Edit a storefront static page.
+ *
+ * The page is handed to PageForm as-is, `faqSections` included — the form
+ * switches to the grouped FAQ editor when the slug is "faq" and uses the Quill
+ * rich-text editor otherwise.
+ *
+ * The About page additionally gets a hero-image uploader; it saves to
+ * /website/about alongside the page write, so the image that sits at the top
+ * of the storefront /about screen is editable from right here.
+ */
 export default function EditPagePage({
   params,
 }: {
@@ -113,24 +43,18 @@ export default function EditPagePage({
 }) {
   const { id } = use(params);
   const { data: page, isLoading } = usePage(id);
-  const api = useAxiosAuth();
-  const [founderImageOverride, setFounderImageOverride] = useState<
-    FounderImageItem[] | null
-  >(null);
 
-  const defaultFounderImage = useMemo<FounderImageItem[]>(() => {
-    if (page?.slug !== "know-our-founder") {
-      return [];
-    }
+  const isAboutPage = page?.slug === ABOUT_SLUG;
+  const { data: about } = useGetAbout({ enabled: isAboutPage });
+  const updateAbout = useUpdateAbout();
 
-    const imageUrl = extractFounderImage(page.content || "");
+  const [hero, setHero] = useState<HeroImage[]>([]);
 
-    return imageUrl
-      ? [{ id: "founder-image", url: imageUrl, isPrimary: true }]
-      : [];
-  }, [page]);
-
-  const founderImage = founderImageOverride ?? defaultFounderImage;
+  // Seed the uploader from the saved hero once it arrives.
+  useEffect(() => {
+    const url = about?.imageMain?.trim();
+    setHero(url ? [{ id: "about-hero", url, isPrimary: true }] : []);
+  }, [about?.imageMain]);
 
   if (isLoading) {
     return (
@@ -156,45 +80,17 @@ export default function EditPagePage({
     );
   }
 
-  const isFounderPage = page.slug === "know-our-founder";
-  const isAboutPage = page.slug === "about-us";
-  const pageFormData = isFounderPage
-    ? { ...page, content: removeFounderImageBlock(page.content || "") }
-    : isAboutPage
-      ? { ...page, content: removeAboutBrandImageBlock(page.content || "") }
-      : page;
+  /** Uploads a newly picked hero and stores its URL on the About singleton. */
+  const saveHero = async () => {
+    const current = hero[0];
+    const imageMain = current?.file
+      ? ((await uploadService(realApi).uploadImage(current.file)).publicUrl ??
+        "")
+      : (current?.url ?? "");
 
-  const transformValues = async (values: {
-    title: string;
-    slug: string;
-    content: string;
-    status: "active" | "inactive";
-  }) => {
-    if (!isFounderPage && !isAboutPage) {
-      return values;
+    if (imageMain !== (about?.imageMain ?? "")) {
+      await updateAbout.mutateAsync({ imageMain });
     }
-
-    if (isAboutPage) {
-      return {
-        ...values,
-        content: removeAboutBrandImageBlock(values.content),
-      };
-    }
-
-    const current = founderImage[0];
-    let imageUrl = "";
-
-    if (current?.file) {
-      const uploaded = await uploadService(api).uploadImage(current.file);
-      imageUrl = uploaded.publicUrl || uploaded.url || uploaded.fileUrl || "";
-    } else if (current?.url?.startsWith("http")) {
-      imageUrl = current.url;
-    }
-
-    return {
-      ...values,
-      content: replaceFounderImage(values.content, imageUrl),
-    };
   };
 
   return (
@@ -214,24 +110,36 @@ export default function EditPagePage({
       </div>
 
       <PageForm
-        initialData={pageFormData}
+        initialData={{
+          id: page.id,
+          title: page.title,
+          slug: page.slug,
+          content: page.content ?? "",
+          status: page.status,
+          faqSections: page.faqSections ?? null,
+        }}
         isEdit
-        transformValues={transformValues}
+        extraSave={isAboutPage ? saveHero : undefined}
         extraFields={
-          isFounderPage ? (
+          isAboutPage ? (
             <Card>
               <CardHeader>
-                <CardTitle>Founder Image</CardTitle>
+                <CardTitle>Hero image</CardTitle>
+                <CardDescription>
+                  Shown full-width at the top of the storefront /about page.
+                  Saved when you update the page.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <ImageUpload
-                  images={founderImage}
-                  onChange={setFounderImageOverride}
+                  images={hero}
+                  onChange={setHero}
                   maxImages={1}
                   replaceWhenFull
                   showPrimary={false}
-                  uploadLabel="Upload founder image"
-                  inputId="founder-page-image-upload"
+                  objectFit="cover"
+                  uploadLabel="Upload hero image"
+                  inputId="about-hero-upload"
                 />
               </CardContent>
             </Card>

@@ -1,20 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, ImageOff, Trash2, Upload, X } from "lucide-react";
+import { ChevronDown, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import {
+  ImageItemGallery,
+  type ImageItem,
+} from "./image-item-gallery";
 
-// A colour image is either an already-hosted URL (existing products / prior
-// uploads) or a locally-picked File uploaded to Cloudinary only when the form
-// is saved. Shared with product-form.tsx, which owns the same shape for the
-// product-level gallery.
-export type ImageItem =
-  | { kind: "url"; url: string }
-  | { kind: "file"; file: File; preview: string };
+// Re-exported for the existing callers that import it from here; the type now
+// lives with <ImageItemGallery>, which is what manipulates it.
+export type { ImageItem };
 
 // A colour is a full variant: it may carry its own images, sizes, sold-out set,
 // price, compare-at and stock. Any array left empty / number left undefined
@@ -109,12 +109,6 @@ export function ColorVariantCard({
     onChange({ images: [...variant.images, ...items] });
   };
 
-  const removeImage = (i: number) => {
-    const target = variant.images[i];
-    if (target?.kind === "file") URL.revokeObjectURL(target.preview);
-    onChange({ images: variant.images.filter((_, idx) => idx !== i) });
-  };
-
   const toggleSize = (s: string) => {
     const next = variant.sizes.includes(s)
       ? variant.sizes.filter((x) => x !== s)
@@ -200,53 +194,16 @@ export function ColorVariantCard({
           {/* Per-colour images */}
           <div className="space-y-2">
             <Label>Photos for this colour</Label>
-            {variant.images.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {variant.images.map((img, i) => {
-                  const src = img.kind === "url" ? img.url : img.preview;
-                  return (
-                    <div
-                      key={i}
-                      className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-muted"
-                    >
-                      {src.trim() ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={src}
-                          alt=""
-                          className="h-full w-full object-cover"
-                          onError={(e) => {
-                            e.currentTarget.style.display = "none";
-                          }}
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                          <ImageOff className="h-4 w-4" />
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => removeImage(i)}
-                        aria-label="Remove image"
-                        className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/90 text-foreground shadow ring-1 ring-black/10 transition hover:bg-destructive hover:text-destructive-foreground"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                      {img.kind === "file" && (
-                        <span className="absolute left-1 top-1 rounded bg-amber-500/90 px-1 text-[9px] font-medium text-white">
-                          Pending
-                        </span>
-                      )}
-                      {i === 0 && (
-                        <span className="absolute inset-x-0 bottom-0 bg-primary/80 text-center text-[9px] font-medium text-primary-foreground">
-                          Primary
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <p className="text-xs text-muted-foreground">
+              Photo #1 leads for this colour — drag to reorder, or use ★ to set
+              any photo as primary.
+            </p>
+            <ImageItemGallery
+              images={variant.images}
+              onChange={(next) => onChange({ images: next })}
+              size="sm"
+              disabled={disabled}
+            />
             <input
               ref={fileInputRef}
               type="file"

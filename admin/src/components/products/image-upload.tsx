@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { X, Upload, GripVertical } from "lucide-react";
+import { Upload, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
+import { ImageRemoveButton } from "@/components/ui/image-remove-button";
 
 interface ImageFile {
   id: string;
@@ -221,7 +222,10 @@ export function ImageUpload({
               onDrop={(e) => handleDropItem(e, index)}
               onClick={() => setSelectedImageId(image.id)}
               className={cn(
-                "relative group rounded-lg overflow-hidden border-2 transition-all duration-200",
+                // No `overflow-hidden` here: the remove button straddles the
+                // corner and would be clipped. The inner wrapper does the
+                // clipping instead, so the image still follows the radius.
+                "relative group rounded-lg border-2 transition-all duration-200",
                 reorderable && "cursor-move",
                 showPrimary && image.isPrimary
                   ? "border-primary ring-2 ring-primary/20"
@@ -231,79 +235,75 @@ export function ImageUpload({
                   "opacity-50 border-primary border-dashed",
               )}
             >
-              {/* Image */}
-              <ImageShimmer
-                src={image.url}
-                alt="Product"
-                wrapperClassName="aspect-square w-full"
-                objectFit={objectFit}
-              />
+              <div className="relative overflow-hidden rounded-[inherit]">
+                {/* Image */}
+                <ImageShimmer
+                  src={image.url}
+                  alt="Product"
+                  wrapperClassName="aspect-square w-full"
+                  objectFit={objectFit}
+                />
 
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="destructive"
+                {/* Overlay */}
+                <div
+                  className={cn(
+                    "absolute inset-0 bg-black/60 opacity-0 transition-opacity duration-200 flex items-center justify-center gap-2 flex-wrap px-2",
+                    "group-hover:opacity-100",
+                    selectedImageId === image.id && "max-lg:opacity-100",
+                  )}
+                >
+                  {replaceWhenFull && maxImages === 1 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        document.getElementById(inputId)?.click();
+                      }}
+                      className="text-xs"
+                    >
+                      Replace
+                    </Button>
+                  )}
+                  {showPrimary && !image.isPrimary && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleSetPrimary(image.id);
+                      }}
+                      className="text-xs"
+                    >
+                      Set Primary
+                    </Button>
+                  )}
+                </div>
+
+                {/* Primary Badge */}
+                {showPrimary && image.isPrimary && (
+                  <div className="absolute top-2 left-2 bg-primary text-primary-foreground text-xs px-2 py-1 rounded-md font-medium">
+                    Primary
+                  </div>
+                )}
+
+                {/* Drag Handle */}
+                {reorderable && (
+                  <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity cursor-move">
+                    <GripVertical className="w-4 h-4 text-white" />
+                  </div>
+                )}
+              </div>
+
+              <ImageRemoveButton
                 onClick={(event) => {
                   event.stopPropagation();
                   handleRemove(image.id);
                 }}
-                className="absolute top-2 right-2 z-20 rounded-full shadow-sm"
-                aria-label="Delete image"
-              >
-                <X className="w-4 h-4" />
-              </Button>
-
-              {/* Overlay */}
-              <div
-                className={cn(
-                  "absolute inset-0 bg-black/60 opacity-0 transition-opacity duration-200 flex items-center justify-center gap-2 flex-wrap px-2",
-                  "group-hover:opacity-100",
-                  selectedImageId === image.id && "max-lg:opacity-100",
-                )}
-              >
-                {replaceWhenFull && maxImages === 1 && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      document.getElementById(inputId)?.click();
-                    }}
-                    className="text-xs"
-                  >
-                    Replace
-                  </Button>
-                )}
-                {showPrimary && !image.isPrimary && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      handleSetPrimary(image.id);
-                    }}
-                    className="text-xs"
-                  >
-                    Set Primary
-                  </Button>
-                )}
-              </div>
-
-              {/* Primary Badge */}
-              {showPrimary && image.isPrimary && (
-                <div className="absolute top-2 left-2 bg-primary text-primary-foreground text-xs px-2 py-1 rounded-md font-medium">
-                  Primary
-                </div>
-              )}
-
-              {/* Drag Handle */}
-              {reorderable && (
-                <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity cursor-move">
-                  <GripVertical className="w-4 h-4 text-white" />
-                </div>
-              )}
+                label="Remove image"
+              />
             </div>
           ))}
         </div>

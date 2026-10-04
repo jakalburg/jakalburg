@@ -34,6 +34,23 @@ model Order {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
+  // ── Payment ───────────────────────────────────────────────────────────
+  // How the order was paid for. "razorpay" rows only ever exist because a
+  // payment was cryptographically verified before the row was written (see
+  // OrdersController.verifyRazorpay), so `paymentStatus` is "paid" for them
+  // from the moment they exist. "cod" rows are "cod_pending" until collected.
+  // Null on orders placed before payments were wired up.
+  paymentMethod String? // "razorpay" | "cod"
+  paymentStatus String? // "paid" | "cod_pending"
+
+  // Razorpay's identifiers for the verified payment, kept for reconciliation
+  // and refunds. `razorpaySignature` is the HMAC the server checked; storing
+  // it means a disputed order can be re-verified from the row alone.
+  razorpayOrderId   String?
+  razorpayPaymentId String? @unique // also the idempotency key: one order per payment
+  razorpaySignature String?
+  razorpayMethod    String? // what Razorpay reported: "upi" | "card" | "netbanking" | …
+
   // ── Google Sheets mirror (google_sheets_appscript.gs) ──────────────────
   // Whether this order made it into the owner's spreadsheet. Purely a record
   // of the last sync attempt — the sheet itself is the copy, never the source

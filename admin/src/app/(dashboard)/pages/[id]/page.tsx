@@ -83,6 +83,9 @@ export default function ViewPagePage({
   }
 
   const previewContent = replacePlaceholders(page.content || "", settings);
+  // The FAQ page stores its Q&A in `faqSections`, not `content` — previewing
+  // `content` for it would render an empty box.
+  const faqSections = page.faqSections ?? [];
 
   return (
     <div className="space-y-6">
@@ -124,10 +127,32 @@ export default function ViewPagePage({
         <CardContent className="space-y-6">
           <div>
             <h3 className="font-medium mb-2">Content Preview</h3>
-            <div
-              className="page-preview-content ql-editor min-h-[200px] rounded-md border p-4"
-              dangerouslySetInnerHTML={{ __html: previewContent }}
-            />
+            {faqSections.length > 0 ? (
+              <div className="min-h-[200px] space-y-6 rounded-md border p-4">
+                {faqSections.map((section, sectionIndex) => (
+                  <div key={sectionIndex}>
+                    <h4 className="font-semibold">{section.heading}</h4>
+                    <dl className="mt-3 space-y-3">
+                      {section.items.map((item, itemIndex) => (
+                        <div key={itemIndex}>
+                          <dt className="text-sm font-medium">
+                            {item.question}
+                          </dt>
+                          <dd className="text-sm text-muted-foreground">
+                            {item.answer}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div
+                className="page-preview-content ql-editor min-h-[200px] rounded-md border p-4"
+                dangerouslySetInnerHTML={{ __html: previewContent }}
+              />
+            )}
             <style jsx>{`
               .page-preview-content {
                 overflow: visible;

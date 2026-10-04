@@ -6,12 +6,14 @@ import { useAppDispatch, useAppSelector } from "@/redux/hooks";
 import { setSearchOpen, setCartOpen, setMobileNavOpen } from "@/redux/features/ui-slice";
 import { selectCartCount } from "@/redux/features/cart-slice";
 import { useHydrated } from "@/hooks/useHydrated";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
 import { MegaMenu } from "./MegaMenu";
 
 export function Header() {
   const dispatch = useAppDispatch();
   const hydrated = useHydrated();
   const count = useAppSelector(selectCartCount);
+  const { storeName, logo } = useSiteSettings();
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
@@ -52,8 +54,10 @@ export function Header() {
           </div>
         </div>
 
-        <Link href="/" className="flex items-center" aria-label="Jakalburg home">
-          <img src="/logo.png" alt="Jakalburg" className="h-16 w-auto mix-blend-multiply" />
+        <Link href="/" className="flex items-center" aria-label={`${storeName} home`}>
+          {/* Smaller on phones: at 64px the logo crowded the icon row off the
+              edge of a 375px screen. Desktop keeps the original size. */}
+          <img src={logo} alt={storeName} className="h-10 w-auto mix-blend-multiply lg:h-16" />
         </Link>
 
 
@@ -61,10 +65,13 @@ export function Header() {
           <Button variant="ghost" size="icon" aria-label="Search" onClick={() => dispatch(setSearchOpen(true))}>
             <Search className="size-5" aria-hidden="true" />
           </Button>
-          <Button variant="ghost" size="icon" aria-label="Account" asChild>
+          {/* Account and wishlist live in the drawer on phones — four targets
+              in this row is already tight at 375px, and both are one tap away
+              under the menu button. */}
+          <Button variant="ghost" size="icon" aria-label="Account" asChild className="hidden lg:inline-flex">
             <Link href="/account"><User className="size-5" aria-hidden="true" /></Link>
           </Button>
-          <Button variant="ghost" size="icon" aria-label="Wishlist" asChild>
+          <Button variant="ghost" size="icon" aria-label="Wishlist" asChild className="hidden lg:inline-flex">
             <Link href="/wishlist"><Heart className="size-5" aria-hidden="true" /></Link>
           </Button>
           <Button

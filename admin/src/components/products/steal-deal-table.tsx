@@ -11,8 +11,6 @@ import {
   Pencil,
   Trash2,
   Search,
-  ChevronLeft,
-  ChevronRight,
   Loader2,
   Power,
   PowerOff,
@@ -21,6 +19,7 @@ import { Product } from "@/types/product";
 import { useDeleteProduct } from "@/hooks/use-products";
 import useAxiosAuth from "@/hooks/use-axios-auth";
 import { productsService } from "@/services/products.service";
+import { TablePagination } from "@/components/admin/table-pagination";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -402,34 +401,13 @@ export function StealDealTable({
         </Table>
       </div>
 
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Showing {products.length} of {total}
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon-sm"
-              disabled={currentPage <= 1}
-              onClick={() => onPageChange(currentPage - 1)}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm">
-              Page {currentPage} of {totalPages}
-            </span>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              disabled={currentPage >= totalPages}
-              onClick={() => onPageChange(currentPage + 1)}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      )}
+      <TablePagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        total={total}
+        onPageChange={onPageChange}
+        itemLabel="deals"
+      />
     </div>
   );
 }

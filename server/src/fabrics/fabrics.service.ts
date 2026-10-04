@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { Fabric, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
+import { CACHE_NS, CACHE_TTL, cacheKeyFor } from '../redis/cache-keys';
 import { CreateFabricDto } from './dto/create-fabric.dto';
 import { UpdateFabricDto } from './dto/update-fabric.dto';
 import {
@@ -24,18 +26,41 @@ import {
  */
 @Injectable()
 export class FabricsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   /** One page of fabrics, A–Z, optionally filtered by name. Feeds both the
    *  admin fabrics table and the product form's fabric picker, which loads 10
-   *  at a time and appends as the admin scrolls. */
+   *  at a time and appends as the admin scrolls.
+   *
+   *  Cached per (page, size, search). Searches are NOT cached: each distinct
+   *  term would mint a key that is read once and then sits there until it
+   *  expires, which on a small key budget is pure waste. */
   async findAll(
     query: PaginationQuery & { search?: string } = {},
   ): Promise<PaginatedResult<Fabric>> {
     const params = parsePagination(query);
-    const where: Prisma.FabricWhereInput = {};
-
     const term = query.search?.trim();
+
+    if (term) return this.loadAll(params, term);
+
+    return this.redis.getOrSet(
+      cacheKeyFor(CACHE_NS.fabrics, {
+        page: params.skip,
+        size: params.take,
+      }),
+      CACHE_TTL.fabrics,
+      () => this.loadAll(params),
+    );
+  }
+
+  private async loadAll(
+    params: ReturnType<typeof parsePagination>,
+    term?: string,
+  ): Promise<PaginatedResult<Fabric>> {
+    const where: Prisma.FabricWhereInput = {};
     if (term) where.name = { contains: term, mode: 'insensitive' };
 
     const [total, data] = await this.prisma.$transaction([
@@ -51,14 +76,21 @@ export class FabricsService {
     return paginate(data, total, params);
   }
 
+  /** Drop every cached fabric page. Called after any write. */
+  private invalidate(): Promise<void> {
+    return this.redis.invalidate(`${CACHE_NS.fabrics}*`);
+  }
+
   async create(dto: CreateFabricDto): Promise<Fabric> {
     const name = dto.name.trim();
     if (!name) throw new BadRequestException('Fabric name is required');
     const slug = await this.uniqueSlug(name);
     try {
-      return await this.prisma.fabric.create({
+      const fabric = await this.prisma.fabric.create({
         data: { name, slug, description: dto.description?.trim() || null },
       });
+      await this.invalidate();
+      return fabric;
     } catch (e) {
       throw this.rethrowDuplicate(e, name);
     }
@@ -83,7 +115,9 @@ export class FabricsService {
     }
 
     try {
-      return await this.prisma.fabric.update({ where: { id }, data });
+      const fabric = await this.prisma.fabric.update({ where: { id }, data });
+      await this.invalidate();
+      return fabric;
     } catch (e) {
       throw this.rethrowDuplicate(e, dto.name ?? existing.name);
     }
@@ -96,6 +130,7 @@ export class FabricsService {
     });
     if (!existing) throw new NotFoundException(`Fabric "${id}" not found`);
     await this.prisma.fabric.delete({ where: { id } });
+    await this.invalidate();
     return { success: true, id };
   }
 

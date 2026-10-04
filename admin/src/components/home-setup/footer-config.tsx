@@ -14,8 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { ImageUpload } from "@/components/products/image-upload";
-import { uploadService } from "@/services/upload.service";
-import useAxiosAuth from "@/hooks/use-axios-auth";
+import { uploadSingleImage } from "@/services/uploads.service";
 import { toast } from "sonner";
 
 type ImageItem = {
@@ -45,6 +44,14 @@ const toImageItem = (id: string, url?: string): ImageItem[] =>
 
 const DEFAULT_IMAGE_OPACITY = 34;
 
+/**
+ * The storefront footer's own background (`--background` in the client's
+ * index.css). The preview veils the image with THIS, not white — the veil has
+ * to be the colour the image is actually sitting on, or the preview lies about
+ * how washed out the result looks.
+ */
+const STOREFRONT_BG = "oklch(0.98 0.008 90)";
+
 const getOpacity = (value: unknown) =>
   typeof value === "number" && Number.isFinite(value)
     ? Math.min(100, Math.max(0, value))
@@ -59,7 +66,6 @@ export function FooterConfigModal({
   sectionData,
   onSave,
 }: Props) {
-  const api = useAxiosAuth();
   const [desktopImages, setDesktopImages] = useState<ImageItem[]>([]);
   const [mobileImages, setMobileImages] = useState<ImageItem[]>([]);
   const [desktopOpacity, setDesktopOpacity] = useState(DEFAULT_IMAGE_OPACITY);
@@ -96,13 +102,13 @@ export function FooterConfigModal({
     normalizedData.separateMobileOpacity,
   ]);
 
+  // A removed image must stay removed, so an empty list resolves to "". Only a
+  // newly picked file costs an upload; a pasted or unchanged URL passes through.
   const resolveImageUrl = async (images: ImageItem[], fallback = "") => {
     const image = images[0];
     if (!image) return "";
     if (!image.file) return image.url || fallback;
-
-    const uploaded = await uploadService(api).uploadImage(image.file);
-    return uploaded.publicUrl || uploaded.fileUrl || uploaded.url || fallback;
+    return uploadSingleImage(image.file);
   };
 
   const handleSave = async () => {
@@ -129,7 +135,11 @@ export function FooterConfigModal({
       onOpenChange(false);
     } catch (error) {
       console.error("Failed to save footer background images:", error);
-      toast.error("Failed to save footer background images");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to save footer background images",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -151,8 +161,9 @@ export function FooterConfigModal({
         <span className="text-xs text-muted-foreground">{opacity}%</span>
       </div>
       <div
-        className={`relative overflow-hidden rounded-md border bg-[#fffdf8] shadow-sm ${className}`}
+        className={`relative overflow-hidden rounded-md border shadow-sm ${className}`}
         style={{
+          backgroundColor: STOREFRONT_BG,
           backgroundImage: imageUrl ? `url(${imageUrl})` : undefined,
           backgroundSize: "cover",
           backgroundPosition: "center",
@@ -161,18 +172,29 @@ export function FooterConfigModal({
         <div
           className="absolute inset-0"
           style={{
-            background: `rgba(255, 255, 255, ${getOverlayOpacity(opacity)})`,
+            backgroundColor: STOREFRONT_BG,
+            opacity: getOverlayOpacity(opacity),
           }}
         />
+        {/* Mirrors the storefront footer's actual columns, so the preview
+            shows roughly where the image will and won't be covered. */}
         <div className="relative z-10 h-full p-4">
-          <div className="grid grid-cols-2 gap-4 text-[10px] uppercase tracking-wide text-neutral-900">
+          <div className="grid grid-cols-3 gap-4 text-[10px] uppercase tracking-wide text-neutral-900">
             <div>
-              <div className="font-bold">About Us</div>
-              <div className="mt-2 normal-case text-neutral-700">About Us</div>
+              <div className="font-bold">Jakalburg</div>
+              <div className="mt-2 normal-case text-neutral-700">
+                Considered wardrobe essentials
+              </div>
             </div>
             <div>
-              <div className="font-bold">Customer Care</div>
-              <div className="mt-2 normal-case text-neutral-700">Shipping policy</div>
+              <div className="font-bold">Shop</div>
+              <div className="mt-2 normal-case text-neutral-700">
+                New arrivals
+              </div>
+            </div>
+            <div>
+              <div className="font-bold">Help</div>
+              <div className="mt-2 normal-case text-neutral-700">Contact</div>
             </div>
           </div>
         </div>

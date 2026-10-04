@@ -1,0 +1,38 @@
+// Singleton row of SMTP / email delivery config — the admin's
+// Settings → Email screen writes it; EmailService reads it to build the
+// nodemailer transport. One row only; the service creates it on first read,
+// seeded from the SMTP_* environment variables so an existing deployment keeps
+// sending without any manual step.
+//
+// DELIBERATELY SEPARATE from the `Settings` singleton: that model is read
+// PUBLICLY by the storefront ("keep credentials and keys off it"). This one is
+// admin-only and holds a credential.
+//
+// `smtpPassword` is stored ENCRYPTED (AES-256-GCM, see common/crypto.util.ts)
+// and is never returned by the API — the admin only learns whether a password
+// is set, via the derived `isSmtpConfigured` flag.
+//
+// Every field is optional: a blank field falls back to its SMTP_* env var, so
+// email keeps working even if the row is half-filled.
+model EmailSettings {
+  id String @id @default(cuid())
+
+  // ---- SMTP transport ----
+  smtpHost     String?
+  smtpPort     Int?
+  smtpSecure   Boolean? // true for port 465, false for 587 (STARTTLS)
+  smtpUser     String?
+  smtpPassword String? // AES-256-GCM ciphertext, never plaintext
+
+  // ---- Envelope ----
+  smtpFromEmail String?
+  smtpFromName  String?
+
+  // ---- Recipients ----
+  // Where the new-order owner notification is delivered. Kept editable because
+  // the admin login address isn't always a reachable mailbox.
+  ownerEmail String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

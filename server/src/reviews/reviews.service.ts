@@ -15,6 +15,8 @@ import {
   User,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
+import { CACHE_NS } from '../redis/cache-keys';
 import {
   AdminBulkCreateReviewDto,
   AdminCreateReviewDto,
@@ -66,7 +68,28 @@ const INCLUDE_CONTEXT = {
 
 @Injectable()
 export class ReviewsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
+
+  /**
+   * Drop the cached product reads.
+   *
+   * Reviews own three denormalized columns ON Product — `avgRating`,
+   * `reviewCount` and `reviewsHidden` — and all three are returned inside the
+   * storefront product payloads, which are cached for 5-10 minutes. Without
+   * this, approving a review updates the database and the shopper keeps seeing
+   * the old star rating until the TTL lapses.
+   *
+   * Called once per admin action rather than inside recomputeProductRating:
+   * the bulk-create path recomputes per product, and a SCAN+DEL sweep per
+   * product would burn the Upstash free plan's 10,000 daily commands for no
+   * extra correctness — one sweep clears the whole namespace anyway.
+   */
+  private invalidateProductCaches(): Promise<void> {
+    return this.redis.invalidate(`${CACHE_NS.products}*`);
+  }
 
   // ---------------------------------------------------------------------------
   // Storefront (public) — approved reviews only, ever.
@@ -367,6 +390,7 @@ export class ReviewsService {
 
     if (status === ReviewStatus.approved) {
       await this.recomputeProductRating(dto.productId);
+      await this.invalidateProductCaches();
     }
     return this.toAdminResponse(review as ReviewWithContext);
   }
@@ -442,6 +466,8 @@ export class ReviewsService {
       for (const productId of productIds) {
         await this.recomputeProductRating(productId);
       }
+      // One sweep after the whole batch, not one per product.
+      await this.invalidateProductCaches();
     }
     return { created: result.count };
   }
@@ -461,6 +487,7 @@ export class ReviewsService {
       where: dto.all ? {} : { id: { in: dto.productIds } },
       data: { reviewsHidden: dto.hidden },
     });
+    await this.invalidateProductCaches();
     return { updated: result.count };
   }
 
@@ -534,6 +561,7 @@ export class ReviewsService {
       include: INCLUDE_CONTEXT,
     });
     await this.recomputeProductRating(existing.productId);
+    await this.invalidateProductCaches();
     return this.toAdminResponse(review as ReviewWithContext);
   }
 
@@ -547,6 +575,7 @@ export class ReviewsService {
 
     await this.prisma.review.delete({ where: { id } });
     await this.recomputeProductRating(existing.productId);
+    await this.invalidateProductCaches();
     return { success: true, id };
   }
 

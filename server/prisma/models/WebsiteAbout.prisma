@@ -1,0 +1,27 @@
+// Singleton row of editable "About" page content — the admin's
+// Website → About Page tab writes it; the storefront /about page reads it
+// (public). One row only; the service creates it on first read and updates it
+// in place. All fields optional so a fresh install renders sensible fallbacks.
+//
+// The storefront renders `imageMain` (hero), `subtitle` (eyebrow), `title`
+// (heading) and `description` (body — blank-line-separated paragraphs).
+// `imageSub`, `videoMain`, `founderQuote` and `founderText` are kept because
+// the existing admin form edits them, but the Jakalburg storefront does not
+// render them today.
+model WebsiteAbout {
+  id String @id @default(cuid())
+
+  subtitle    String? // eyebrow above the heading, e.g. "Our story"
+  title       String? // page heading
+  description String? // body copy; blank lines separate paragraphs
+  imageMain   String? // hero image URL
+
+  // Edited in the admin form, not rendered on the storefront today.
+  imageSub     String?
+  videoMain    String?
+  founderQuote String?
+  founderText  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

@@ -35,6 +35,8 @@ import { useDelivery } from "@/lib/delivery-context";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { TableSkeleton } from "@/components/admin/table-skeleton";
+import { TablePagination } from "@/components/admin/table-pagination";
+import { useClientPagination } from "@/hooks/use-client-pagination";
 
 export default function DeliveryCompaniesPage() {
   const { companies, addCompany, updateCompany, deleteCompany } = useDelivery();
@@ -46,6 +48,9 @@ export default function DeliveryCompaniesPage() {
     trackingUrl: "",
     isActive: true,
   });
+
+  const { pageRows, page, totalPages, total, setPage } =
+    useClientPagination(companies);
 
   // Simulate initial loading
   useEffect(() => {
@@ -201,7 +206,7 @@ export default function DeliveryCompaniesPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  companies.map((company) => (
+                  pageRows.map((company) => (
                     <TableRow key={company.id}>
                       <TableCell className="font-medium">
                         {company.name}
@@ -238,6 +243,15 @@ export default function DeliveryCompaniesPage() {
                 )}
               </TableBody>
             </Table>
+          )}
+          {!isLoading && (
+            <TablePagination
+              currentPage={page}
+              totalPages={totalPages}
+              total={total}
+              onPageChange={setPage}
+              itemLabel="companies"
+            />
           )}
         </CardContent>
       </Card>

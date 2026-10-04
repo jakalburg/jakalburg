@@ -1,0 +1,58 @@
+// Singleton row of media-storage and cache config — the admin's
+// Settings → Media screen writes it; UploadService and RedisService read it.
+// One row only; the service creates it on first read, seeded from the
+// CLOUDINARY_* environment variables so existing uploads keep working without
+// any manual step.
+//
+// DELIBERATELY SEPARATE from the `Settings` singleton: that model is read
+// PUBLICLY by the storefront ("keep credentials and keys off it"). This one is
+// admin-only and holds three credentials. The kaybykhushie reference keeps
+// these fields on its public Settings model, which exposes them to anyone who
+// can call GET /settings — not copied.
+//
+// The three secrets (`cloudinaryApiSecret`, `r2SecretAccessKey`, `redisToken`)
+// are stored ENCRYPTED (AES-256-GCM, see common/crypto.util.ts) and are never
+// returned by the API. The admin only learns whether each is set, via the
+// derived `isCloudinaryConfigured` / `isR2Configured` / `isRedisConfigured`
+// flags.
+//
+// Every field is optional: a blank field falls back to its env var where one
+// exists, so uploads keep working even if the row is half-filled.
+model StorageSettings {
+  id String @id @default(cuid())
+
+  // ---- Active provider ----
+  // "cloudinary" | "r2". Routes NEW uploads only — existing images are stored
+  // as absolute URLs and keep resolving from whichever provider holds them.
+  // Deletes route by URL host, not by this field, so switching never orphans
+  // files on the other provider.
+  storageProvider String @default("cloudinary")
+
+  // ---- Cloudinary ----
+  cloudinaryCloudName String?
+  cloudinaryApiKey    String?
+  cloudinaryApiSecret String? // AES-256-GCM ciphertext, never plaintext
+  // Only consulted when Cloudinary's own API doesn't report a quota.
+  cloudinaryStorageLimitBytes Float?
+
+  // ---- Cloudflare R2 (S3-compatible) ----
+  r2AccountId       String?
+  r2AccessKeyId     String?
+  r2SecretAccessKey String? // AES-256-GCM ciphertext, never plaintext
+  r2BucketName      String?
+  r2Endpoint        String? // https://<account>.r2.cloudflarestorage.com
+  r2PublicUrl       String? // public CDN origin, e.g. https://pub-xxx.r2.dev
+  // R2 is usage-billed with no hard quota, so this limit is purely for the
+  // admin's own tracking bar.
+  r2StorageLimitBytes Float?
+
+  // ---- Upstash Redis cache ----
+  // When disabled or unreachable every cached read falls through to Postgres,
+  // so the store works identically with caching off. That is the default.
+  redisEnabled Boolean @default(false)
+  redisUrl     String? // Upstash REST endpoint
+  redisToken   String? // AES-256-GCM ciphertext, never plaintext
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

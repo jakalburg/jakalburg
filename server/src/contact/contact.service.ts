@@ -1,7 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Contact, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateContactDto, UpdateContactStatusDto } from './dto/contact.dto';
+import {
+  PaginatedResult,
+  PaginationQuery,
+  paginate,
+  parsePagination,
+} from '../common/pagination';
+
+export interface ContactListQuery extends PaginationQuery {
+  /** Restrict to one inbox: 'contact_us' | 'newsletter'. */
+  type?: string;
+}
 
 /**
  * ContactService — storefront contact + newsletter submissions.
@@ -28,14 +39,30 @@ export class ContactService {
     });
   }
 
-  /** One inbox: every submission of a given `type`, newest-first. */
-  findAll(type?: string) {
+  /**
+   * One inbox, newest-first, a page at a time.
+   *
+   * This table only grows — every contact form and newsletter signup adds a
+   * row — so the inbox pages in SQL rather than shipping the whole history to
+   * the browser to be sliced there.
+   */
+  async findAll(query: ContactListQuery = {}): Promise<PaginatedResult<Contact>> {
+    const params = parsePagination(query);
+
     const where: Prisma.ContactWhereInput = {};
-    if (type) where.type = type;
-    return this.prisma.contact.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
+    if (query.type) where.type = query.type;
+
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.contact.count({ where }),
+      this.prisma.contact.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: params.skip,
+        take: params.take,
+      }),
+    ]);
+
+    return paginate(rows, total, params);
   }
 
   async findOne(id: string) {

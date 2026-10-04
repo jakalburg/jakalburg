@@ -12,17 +12,20 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
 import {
-  useSettings,
-  useUpdateSettings,
+  useStorageSettings,
+  useUpdateStorageSettings,
+  useVerifyStorage,
+  useStorageUsage,
   useRedisStats,
   useRedisKeys,
-  useStorageUsage,
-} from "@/hooks/use-settings";
-import useAxiosAuth from "@/hooks/use-axios-auth";
-import API_ENDPOINTS from "@/config/endpoints";
+  useVerifyRedis,
+  useFlushCache,
+  type ProviderUsage,
+  type StorageProvider,
+} from "@/hooks/use-storage-settings";
 import { toast } from "sonner";
-import { Progress } from "@/components/ui/progress";
 import {
   Check,
   Cloud,
@@ -32,19 +35,39 @@ import {
   Pencil,
   Database,
   Key,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import { SettingsActions } from "./settings-layout";
 
-export function StorageTab() {
-  const { data: storeSettings, isLoading } = useSettings();
-  const { data: redisStats } = useRedisStats();
-  const { data: redisKeys } = useRedisKeys();
-  const { data: storageUsage, isLoading: isStorageUsageLoading } =
-    useStorageUsage();
-  const updateStoreMutation = useUpdateSettings();
-  const api = useAxiosAuth();
+const GB = 1024 * 1024 * 1024;
 
-  const [storageProvider, setStorageProvider] = useState("cloudinary");
+/** Bytes <-> GB for the manual-limit inputs. */
+const toGb = (bytes: number | null | undefined) =>
+  bytes ? String(Number(bytes / GB).toFixed(2)) : "";
+const fromGb = (gb: string) => (gb ? Number(gb) * GB : null);
+
+export function StorageTab() {
+  // REAL backend (server StorageSettings singleton), not the mock settings blob.
+  const { data: settings, isLoading } = useStorageSettings();
+  const updateSettings = useUpdateStorageSettings();
+  const verifyStorage = useVerifyStorage();
+  const verifyRedis = useVerifyRedis();
+  const flushCache = useFlushCache();
+
+  // Usage and stats load ONCE on mount and then only on request — see the note
+  // in use-storage-settings.ts about the free-tier command budget.
+  const storageUsage = useStorageUsage(true);
+  const redisStats = useRedisStats(true);
+
+  // The key viewer is the expensive one: a scan plus TYPE+TTL per key. Strictly
+  // opt-in, never on mount.
+  const [showKeys, setShowKeys] = useState(false);
+  const redisKeys = useRedisKeys(showKeys);
+
+  const [storageProvider, setStorageProvider] =
+    useState<StorageProvider>("cloudinary");
+
   const [cloudinaryCloudName, setCloudinaryCloudName] = useState("");
   const [cloudinaryApiKey, setCloudinaryApiKey] = useState("");
   const [cloudinaryApiSecret, setCloudinaryApiSecret] = useState("");
@@ -59,170 +82,136 @@ export function StorageTab() {
   const [r2PublicUrl, setR2PublicUrl] = useState("");
   const [r2StorageLimitGb, setR2StorageLimitGb] = useState("");
   const [isEditingR2, setIsEditingR2] = useState(false);
-  const [isVerifying, setIsVerifying] = useState(false);
 
-  const [redisEnabled, setRedisEnabled] = useState(false);
   const [redisUrl, setRedisUrl] = useState("");
   const [redisToken, setRedisToken] = useState("");
   const [isEditingRedis, setIsEditingRedis] = useState(false);
+
+  const [isVerifying, setIsVerifying] = useState(false);
   const [isVerifyingRedis, setIsVerifyingRedis] = useState(false);
-  const [isClearingCache, setIsClearingCache] = useState(false);
 
-  useEffect(() => {
-    if (storeSettings) {
-      setStorageProvider(storeSettings.storageProvider || "cloudinary");
+  const hydrate = () => {
+    if (!settings) return;
+    setStorageProvider(settings.storageProvider || "cloudinary");
 
-      setCloudinaryCloudName(storeSettings.cloudinaryCloudName || "");
-      setCloudinaryApiKey(storeSettings.cloudinaryApiKey || "");
-      setCloudinaryApiSecret("");
-      setCloudinaryStorageLimitGb(
-        storeSettings.cloudinaryStorageLimitBytes
-          ? String(
-              Number(
-                storeSettings.cloudinaryStorageLimitBytes / 1024 / 1024 / 1024,
-              ).toFixed(2),
-            )
-          : "",
-      );
-      setIsEditingCloudinary(false);
+    setCloudinaryCloudName(settings.cloudinaryCloudName || "");
+    setCloudinaryApiKey(settings.cloudinaryApiKey || "");
+    setCloudinaryApiSecret("");
+    setCloudinaryStorageLimitGb(toGb(settings.cloudinaryStorageLimitBytes));
+    setIsEditingCloudinary(false);
 
-      setR2AccountId(storeSettings.r2AccountId || "");
-      setR2AccessKeyId(storeSettings.r2AccessKeyId || "");
-      setR2SecretAccessKey("");
-      setR2BucketName(storeSettings.r2BucketName || "");
-      setR2Endpoint(storeSettings.r2Endpoint || "");
-      setR2PublicUrl(storeSettings.r2PublicUrl || "");
-      setR2StorageLimitGb(
-        storeSettings.r2StorageLimitBytes
-          ? String(
-              Number(
-                storeSettings.r2StorageLimitBytes / 1024 / 1024 / 1024,
-              ).toFixed(2),
-            )
-          : "",
-      );
-      setIsEditingR2(false);
+    setR2AccountId(settings.r2AccountId || "");
+    setR2AccessKeyId(settings.r2AccessKeyId || "");
+    setR2SecretAccessKey("");
+    setR2BucketName(settings.r2BucketName || "");
+    setR2Endpoint(settings.r2Endpoint || "");
+    setR2PublicUrl(settings.r2PublicUrl || "");
+    setR2StorageLimitGb(toGb(settings.r2StorageLimitBytes));
+    setIsEditingR2(false);
 
-      setRedisEnabled(storeSettings.redisEnabled ?? false);
-      setRedisUrl(storeSettings.redisUrl || "");
-      setRedisToken("");
-      setIsEditingRedis(false);
-    }
-  }, [storeSettings]);
+    setRedisUrl(settings.redisUrl || "");
+    setRedisToken("");
+    setIsEditingRedis(false);
+  };
 
-  const handleSaveProviderSelection = (provider: string) => {
+  useEffect(hydrate, [settings]);
+
+  const redisEnabled = settings?.redisEnabled ?? false;
+
+  /**
+   * The provider switch and the caching toggle persist on click — they are
+   * single non-secret fields, and a switch that silently doesn't save until you
+   * find a Save button elsewhere is a trap.
+   */
+  const saveProvider = (provider: StorageProvider) => {
     setStorageProvider(provider);
-    updateStoreMutation.mutate(
+    updateSettings.mutate(
       { storageProvider: provider },
       {
+        onSuccess: () =>
+          toast.success(
+            `New uploads will go to ${
+              provider === "r2" ? "Cloudflare R2" : "Cloudinary"
+            }. Existing files are unaffected.`,
+          ),
+      },
+    );
+  };
+
+  const toggleCaching = (enabled: boolean) => {
+    updateSettings.mutate(
+      { redisEnabled: enabled },
+      {
+        onSuccess: () =>
+          toast.success(enabled ? "Caching enabled." : "Caching disabled."),
+      },
+    );
+  };
+
+  const saveCloudinary = () => {
+    updateSettings.mutate(
+      {
+        cloudinaryCloudName,
+        cloudinaryApiKey,
+        cloudinaryStorageLimitBytes: fromGb(cloudinaryStorageLimitGb),
+        // Blank means "keep the stored secret" — never send an empty string.
+        ...(cloudinaryApiSecret ? { cloudinaryApiSecret } : {}),
+      },
+      {
         onSuccess: () => {
-          if (provider === "cloudinary") setIsEditingCloudinary(false);
-          if (provider === "r2") setIsEditingR2(false);
+          setIsEditingCloudinary(false);
+          setCloudinaryApiSecret("");
+          toast.success("Cloudinary configuration saved.");
         },
       },
     );
   };
 
-  const handleSaveCloudinary = () => {
-    // Only include the secret if it was actually changed (non-empty)
-    const updatePayload: any = {
-      cloudinaryCloudName,
-      cloudinaryApiKey,
-      cloudinaryStorageLimitBytes: cloudinaryStorageLimitGb
-        ? Number(cloudinaryStorageLimitGb) * 1024 * 1024 * 1024
-        : null,
-    };
-
-    // Only update secret if user explicitly entered a new one
-    if (cloudinaryApiSecret && cloudinaryApiSecret.trim() !== "") {
-      updatePayload.cloudinaryApiSecret = cloudinaryApiSecret;
-    }
-
-    updateStoreMutation.mutate(updatePayload, {
-      onSuccess: () => {
-        setIsEditingCloudinary(false);
-        setCloudinaryApiSecret(""); // Clear the input after save
+  const saveR2 = () => {
+    updateSettings.mutate(
+      {
+        r2AccountId,
+        r2AccessKeyId,
+        r2BucketName,
+        r2Endpoint,
+        r2PublicUrl,
+        r2StorageLimitBytes: fromGb(r2StorageLimitGb),
+        ...(r2SecretAccessKey ? { r2SecretAccessKey } : {}),
       },
-    });
+      {
+        onSuccess: () => {
+          setIsEditingR2(false);
+          setR2SecretAccessKey("");
+          toast.success("Cloudflare R2 configuration saved.");
+        },
+      },
+    );
   };
 
-  const handleSaveR2 = () => {
-    // Only include the secret if it was actually changed (non-empty)
-    const updatePayload: any = {
-      r2AccountId,
-      r2AccessKeyId,
-      r2BucketName,
-      r2Endpoint,
-      r2PublicUrl,
-      r2StorageLimitBytes: r2StorageLimitGb
-        ? Number(r2StorageLimitGb) * 1024 * 1024 * 1024
-        : null,
-    };
-
-    // Only update secret if user explicitly entered a new one
-    if (r2SecretAccessKey && r2SecretAccessKey.trim() !== "") {
-      updatePayload.r2SecretAccessKey = r2SecretAccessKey;
-    }
-
-    updateStoreMutation.mutate(updatePayload, {
-      onSuccess: () => {
-        setIsEditingR2(false);
-        setR2SecretAccessKey(""); // Clear the input after save
+  const saveRedis = () => {
+    updateSettings.mutate(
+      {
+        redisUrl,
+        ...(redisToken ? { redisToken } : {}),
       },
-    });
-  };
-
-  const handleSaveRedis = () => {
-    // Only include the token if it was actually changed (non-empty)
-    const updatePayload: any = {
-      redisEnabled,
-      redisUrl,
-    };
-
-    // Only update token if user explicitly entered a new one
-    if (redisToken && redisToken.trim() !== "") {
-      updatePayload.redisToken = redisToken;
-    }
-
-    updateStoreMutation.mutate(updatePayload, {
-      onSuccess: () => {
-        setIsEditingRedis(false);
-        setRedisToken("");
-        toast.success("Redis settings updated");
+      {
+        onSuccess: () => {
+          setIsEditingRedis(false);
+          setRedisToken("");
+          toast.success("Redis credentials saved.");
+        },
       },
-    });
-  };
-
-  const handleClearCache = async () => {
-    setIsClearingCache(true);
-    try {
-      const response = await api.post("/settings/clear-cache");
-      if (response.data?.success) {
-        toast.success("Cache cleared successfully");
-      } else {
-        toast.error("Failed to clear cache", {
-          description: response.data?.message || "Unknown error",
-        });
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error("An error occurred while clearing the cache");
-    } finally {
-      setIsClearingCache(false);
-    }
+    );
   };
 
   const handleVerifyStorage = async () => {
     setIsVerifying(true);
     try {
-      const response = await api.post(API_ENDPOINTS.settings.verifyStorage);
-      if (response.data?.success) {
-        toast.success(response.data.message);
-      } else {
-        toast.error(response.data.message || "Failed to connect to storage");
-      }
-    } catch (error) {
-      toast.error("Could not reach server to verify storage.");
+      const result = await verifyStorage.mutateAsync();
+      if (result.success) toast.success(result.message);
+      else toast.error(result.message || "Failed to connect to storage.");
+    } catch {
+      toast.error("Could not reach the server to verify storage.");
     } finally {
       setIsVerifying(false);
     }
@@ -231,26 +220,31 @@ export function StorageTab() {
   const handleVerifyRedis = async () => {
     setIsVerifyingRedis(true);
     try {
-      const response = await api.post(API_ENDPOINTS.settings.verifyRedis);
-      if (response.data?.success) {
-        toast.success(response.data.message);
-      } else {
-        toast.error(response.data.message || "Failed to reach Redis Server.");
-      }
-    } catch (error) {
-      toast.error("Could not reach backend to verify Redis.");
+      const result = await verifyRedis.mutateAsync();
+      if (result.success) toast.success(result.message);
+      else toast.error(result.message || "Failed to reach Redis.");
+    } catch {
+      toast.error("Could not reach the server to verify Redis.");
     } finally {
       setIsVerifyingRedis(false);
     }
   };
 
-  const getStoragePercent = (usage: any) =>
-    typeof usage?.percentUsed === "number"
-      ? Math.min(Math.max(usage.percentUsed, 0), 100)
-      : null;
+  const handleFlush = async () => {
+    try {
+      const result = await flushCache.mutateAsync();
+      if (result.success) toast.success(result.message);
+      else toast.error(result.message);
+    } catch {
+      toast.error("Could not reach the server to flush the cache.");
+    }
+  };
 
-  const renderProviderUsage = (usage: any) => {
-    const percent = getStoragePercent(usage);
+  const renderProviderUsage = (usage?: ProviderUsage) => {
+    const percent =
+      typeof usage?.percentUsed === "number"
+        ? Math.min(Math.max(usage.percentUsed, 0), 100)
+        : null;
 
     return (
       <div className="mt-4 rounded-lg border bg-muted/20 p-3">
@@ -260,11 +254,9 @@ export function StorageTab() {
               Storage used
             </p>
             <p className="mt-1 text-sm font-semibold">
-              {isStorageUsageLoading
-                ? "Loading..."
-                : `${usage?.usedHuman || "0 B"} / ${
-                    usage?.limitHuman || "Provider quota"
-                  }`}
+              {storageUsage.isLoading
+                ? "Loading…"
+                : `${usage?.usedHuman ?? "—"} / ${usage?.limitHuman ?? "—"}`}
             </p>
           </div>
           <p className="text-xs text-muted-foreground">
@@ -273,13 +265,23 @@ export function StorageTab() {
         </div>
         <Progress value={percent ?? 0} className="mt-2 h-1.5" />
         <p className="mt-2 text-xs text-muted-foreground">
-          {percent === null
-            ? "Set a storage limit in this provider's config"
-            : `${percent.toFixed(1)}% used`}
+          {usage?.error
+            ? usage.error
+            : percent === null
+              ? usage?.note || "Set a storage limit in this provider's config"
+              : `${percent.toFixed(1)}% used — ${usage?.note ?? ""}`}
         </p>
       </div>
     );
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[300px] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -289,100 +291,169 @@ export function StorageTab() {
           <div className="space-y-1">
             <CardTitle className="text-xl">Global Data Caching</CardTitle>
             <CardDescription>
-              Boost Next.js performance using Redis memory caching.
+              Serve repeat storefront reads from Redis instead of the database.
             </CardDescription>
           </div>
           <Wifi
-            className={`h-6 w-6 ${redisEnabled ? "text-green-500" : "text-muted-foreground"}`}
+            className={`h-6 w-6 ${
+              redisStats.data?.reachable
+                ? "text-green-500"
+                : "text-muted-foreground"
+            }`}
           />
         </CardHeader>
         <CardContent>
-          <div className="flex items-center space-x-2 mt-4">
+          <div className="mt-4 flex items-center space-x-2">
             <Switch
               id="redis-enabled"
               checked={redisEnabled}
-              onCheckedChange={setRedisEnabled}
+              onCheckedChange={toggleCaching}
+              disabled={updateSettings.isPending}
             />
             <Label htmlFor="redis-enabled">Enable Caching</Label>
           </div>
 
-          {redisEnabled && redisStats?.enabled && (
+          {redisEnabled && !settings?.isRedisConfigured && (
+            <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Caching is on but no Redis URL and token are saved, so every
+                read still goes to the database. Add them below.
+              </span>
+            </div>
+          )}
+
+          {redisEnabled && settings?.isRedisConfigured && (
             <div className="mt-6 space-y-4 border-t pt-4">
               <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Database className="h-4 w-4" />
-                  <span>Memory Usage (Upstash)</span>
+                  <span>Cache contents</span>
                 </div>
-                <span className="font-medium">
-                  {redisStats?.memoryUsedHuman || "0 MB"} /{" "}
-                  {redisStats?.memoryMaxHuman || "256 MB"}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="font-medium">
+                    {redisStats.data?.dbSize ?? 0} keys
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => redisStats.refetch()}
+                    disabled={redisStats.isFetching}
+                    title="Refresh statistics"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${
+                        redisStats.isFetching ? "animate-spin" : ""
+                      }`}
+                    />
+                  </Button>
+                </div>
               </div>
-              <Progress
-                value={
-                  redisStats?.memoryMax
-                    ? (redisStats.memoryUsed / redisStats.memoryMax) * 100
-                    : 0
-                }
-                className="h-2"
-              />
+
+              {/* Upstash's REST API exposes no INFO command, so there are no
+                  memory figures to show. Command usage against the free daily
+                  budget is the number that actually matters here. */}
               <div className="grid grid-cols-2 gap-4 pt-2">
-                <div className="bg-muted/50 p-2 rounded-lg">
-                  <p className="text-xs text-muted-foreground">Keys Cached</p>
+                <div className="rounded-lg bg-muted/50 p-2">
+                  <p className="text-xs text-muted-foreground">
+                    Commands this uptime
+                  </p>
                   <p className="text-sm font-semibold">
-                    {redisStats?.dbSize ?? 0}
+                    {redisStats.data?.commandsThisUptime ?? 0}
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      / {redisStats.data?.freeDailyCommandBudget ?? 10000} daily
+                      (free plan)
+                    </span>
                   </p>
                 </div>
-                <div className="bg-muted/50 p-2 rounded-lg">
-                  <p className="text-xs text-muted-foreground">Redis Uptime</p>
+                <div className="rounded-lg bg-muted/50 p-2">
+                  <p className="text-xs text-muted-foreground">Status</p>
                   <p className="text-sm font-semibold">
-                    {redisStats?.uptime
-                      ? Math.round(redisStats.uptime / 3600)
-                      : 0}{" "}
-                    hrs
+                    {redisStats.data?.reachable ? "Connected" : "Unreachable"}
                   </p>
                 </div>
               </div>
 
-              {/* Redis Keys Viewer */}
-              {redisKeys && redisKeys.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              {redisStats.data?.message && (
+                <p className="text-xs text-muted-foreground">
+                  {redisStats.data.message}
+                </p>
+              )}
+
+              {/* Key viewer — opt-in. Listing costs a scan plus two commands
+                  per key, so it is never fetched automatically. */}
+              <div className="mt-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     <Key className="h-3 w-3" />
                     <span>Cached Keys</span>
                   </div>
-                  <div className="max-h-[200px] overflow-y-auto border rounded-md divide-y bg-slate-50">
-                    {redisKeys.map((item: any) => (
-                      <div
-                        key={item.key}
-                        className="p-2 flex items-center justify-between text-xs"
-                      >
-                        <code
-                          className="bg-blue-100 text-blue-800 px-1 rounded truncate max-w-[200px]"
-                          title={item.key}
-                        >
-                          {item.key}
-                        </code>
-                        <div className="flex gap-2 text-[10px] text-muted-foreground">
-                          <span className="bg-slate-200 px-1 rounded">
-                            {item.type}
-                          </span>
-                          {item.ttl > 0 && <span>TTL: {item.ttl}s</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      showKeys ? redisKeys.refetch() : setShowKeys(true)
+                    }
+                    disabled={redisKeys.isFetching}
+                  >
+                    {redisKeys.isFetching ? (
+                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                    )}
+                    {showKeys ? "Refresh" : "Show keys"}
+                  </Button>
                 </div>
-              )}
+
+                {showKeys && (
+                  <>
+                    <div className="max-h-[200px] divide-y overflow-y-auto rounded-md border bg-slate-50">
+                      {(redisKeys.data?.keys ?? []).length === 0 &&
+                      !redisKeys.isFetching ? (
+                        <p className="p-3 text-xs text-muted-foreground">
+                          No cached keys yet. They appear as the storefront is
+                          browsed.
+                        </p>
+                      ) : (
+                        (redisKeys.data?.keys ?? []).map((item) => (
+                          <div
+                            key={item.key}
+                            className="flex items-center justify-between p-2 text-xs"
+                          >
+                            <code
+                              className="max-w-[240px] truncate rounded bg-blue-100 px-1 text-blue-800"
+                              title={item.key}
+                            >
+                              {item.key}
+                            </code>
+                            <div className="flex gap-2 text-[10px] text-muted-foreground">
+                              <span className="rounded bg-slate-200 px-1">
+                                {item.type}
+                              </span>
+                              {item.ttl > 0 && <span>TTL: {item.ttl}s</span>}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    {redisKeys.data?.truncated && (
+                      <p className="text-xs text-muted-foreground">
+                        Showing the first 50 keys.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           )}
+
           <div className="mt-6 flex justify-end">
             <Button
               variant="destructive"
-              onClick={handleClearCache}
-              disabled={isClearingCache || !redisEnabled}
+              onClick={handleFlush}
+              disabled={flushCache.isPending || !settings?.isRedisConfigured}
             >
-              {isClearingCache && (
+              {flushCache.isPending && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Flush Global Cache
@@ -391,32 +462,21 @@ export function StorageTab() {
         </CardContent>
       </Card>
 
+      {/* Redis credentials */}
       <Card>
         <CardHeader className="flex flex-col gap-4 space-y-0 border-b pb-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <CardTitle className="text-base">Redis Credentials</CardTitle>
-              {storeSettings?.isRedisConfigured && (
-                <div className="flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-medium">
+              {settings?.isRedisConfigured && (
+                <div className="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
                   <Check className="h-3 w-3" /> Configured
                 </div>
               )}
-              {!isEditingRedis && (
-                <button
-                  onClick={handleVerifyRedis}
-                  disabled={isVerifyingRedis}
-                  title="Ping Connection"
-                  className="sm:hidden ml-auto"
-                >
-                  {isVerifyingRedis ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  ) : (
-                    <Wifi className="h-4 w-4 text-primary" />
-                  )}
-                </button>
-              )}
             </div>
-            <CardDescription>REST endpoint for caching.</CardDescription>
+            <CardDescription>
+              Upstash REST endpoint. Paste the URL and token, then Verify.
+            </CardDescription>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             {!isEditingRedis && (
@@ -425,8 +485,7 @@ export function StorageTab() {
                 size="sm"
                 onClick={handleVerifyRedis}
                 disabled={isVerifyingRedis}
-                title="Ping Connection"
-                className="hidden sm:flex md:w-auto"
+                title="Ping connection"
               >
                 {isVerifyingRedis ? (
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
@@ -437,7 +496,7 @@ export function StorageTab() {
             )}
             {!isEditingRedis ? (
               <Button
-                variant="outline" 
+                variant="outline"
                 onClick={() => {
                   setIsEditingRedis(true);
                   setIsEditingCloudinary(false);
@@ -445,19 +504,23 @@ export function StorageTab() {
                 }}
                 className="w-full md:w-auto"
               >
-                <Pencil className="w-4 h-4 mr-2" />
+                <Pencil className="mr-2 h-4 w-4" />
                 Edit Config
               </Button>
             ) : (
               <SettingsActions>
                 <Button
                   variant="outline"
-                  onClick={() => setIsEditingRedis(false)}
+                  onClick={hydrate}
                   className="w-full md:w-auto"
                 >
                   Cancel
                 </Button>
-                <Button onClick={handleSaveRedis} className="w-full md:w-auto">
+                <Button
+                  onClick={saveRedis}
+                  disabled={updateSettings.isPending}
+                  className="w-full md:w-auto"
+                >
                   Save Config
                 </Button>
               </SettingsActions>
@@ -466,11 +529,11 @@ export function StorageTab() {
         </CardHeader>
 
         <CardContent>
-          <div className={`space-y-4 pt-4 border-t transition-all`}>
+          <div className="space-y-4 border-t pt-4">
             <div className="space-y-2">
               <Label>Redis Endpoint URL</Label>
               <Input
-                placeholder="https://..."
+                placeholder="https://xxxx.upstash.io"
                 value={redisUrl}
                 onChange={(e) => setRedisUrl(e.target.value)}
                 disabled={!isEditingRedis}
@@ -481,9 +544,9 @@ export function StorageTab() {
               <Input
                 type="password"
                 placeholder={
-                  storeSettings?.isRedisConfigured
+                  settings?.isRedisConfigured
                     ? "•••••••• (Set successfully)"
-                    : "Enter Redis Token"
+                    : "Enter Redis token"
                 }
                 value={redisToken}
                 onChange={(e) => setRedisToken(e.target.value)}
@@ -497,6 +560,7 @@ export function StorageTab() {
         </CardContent>
       </Card>
 
+      {/* Provider picker */}
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -505,83 +569,108 @@ export function StorageTab() {
                 <HardDrive className="h-5 w-5" /> Media Storage Provider
               </CardTitle>
               <CardDescription>
-                Choose where to store uploaded images and videos.
+                Where NEW uploads go. Existing images keep their current URLs
+                and are not moved.
               </CardDescription>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleVerifyStorage}
-              disabled={isVerifying}
-              className="w-full sm:w-auto"
-            >
-              {isVerifying ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Check className="mr-2 h-4 w-4" />
-              )}
-              Verify Connection
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => storageUsage.refetch()}
+                disabled={storageUsage.isFetching}
+                title="Refresh usage"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${
+                    storageUsage.isFetching ? "animate-spin" : ""
+                  }`}
+                />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleVerifyStorage}
+                disabled={isVerifying}
+                className="w-full sm:w-auto"
+              >
+                {isVerifying ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="mr-2 h-4 w-4" />
+                )}
+                Verify Connection
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div
-              className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
+              className={`cursor-pointer rounded-xl border-2 p-4 transition-all ${
                 storageProvider === "cloudinary"
                   ? "border-primary bg-primary/5"
                   : "hover:border-primary/50"
               }`}
-              onClick={() => handleSaveProviderSelection("cloudinary")}
+              onClick={() => saveProvider("cloudinary")}
             >
-              <div className="flex items-center justify-between mb-2">
+              <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Cloud className="h-5 w-5 text-blue-500" />
                   <span className="font-medium">Cloudinary</span>
                 </div>
                 {storageProvider === "cloudinary" && (
-                  <div className="h-4 w-4 rounded-full bg-primary flex items-center justify-center">
+                  <div className="flex h-4 w-4 items-center justify-center rounded-full bg-primary">
                     <Check className="h-3 w-3 text-white" />
                   </div>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground mt-2">
-                Best for automated image optimization and CDN delivery. Standard
-                choice.
+              <p className="mt-2 text-sm text-muted-foreground">
+                Automatic image optimisation and CDN delivery. The default.
               </p>
-              {renderProviderUsage(storageUsage?.cloudinary)}
+              {renderProviderUsage(storageUsage.data?.cloudinary)}
             </div>
 
             <div
-              className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
+              className={`cursor-pointer rounded-xl border-2 p-4 transition-all ${
                 storageProvider === "r2"
                   ? "border-primary bg-primary/5"
                   : "hover:border-primary/50"
               }`}
-              onClick={() => handleSaveProviderSelection("r2")}
+              onClick={() => saveProvider("r2")}
             >
-              <div className="flex items-center justify-between mb-2">
+              <div className="mb-2 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <HardDrive className="h-5 w-5 text-orange-500" />
                   <span className="font-medium">Cloudflare R2</span>
                 </div>
                 {storageProvider === "r2" && (
-                  <div className="h-4 w-4 rounded-full bg-primary flex items-center justify-center">
+                  <div className="flex h-4 w-4 items-center justify-center rounded-full bg-primary">
                     <Check className="h-3 w-3 text-white" />
                   </div>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground mt-2">
-                S3-compatible, zero egress fees. Best for large video hosting or
-                high volume.
+              <p className="mt-2 text-sm text-muted-foreground">
+                S3-compatible, zero egress fees. Better for large video or high
+                volume.
               </p>
-              {renderProviderUsage(storageUsage?.r2)}
+              {renderProviderUsage(storageUsage.data?.r2)}
             </div>
           </div>
+
+          {storageProvider === "r2" && !settings?.isR2Configured && (
+            <div className="mt-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                R2 is selected but not configured — uploads will fail until the
+                credentials below are filled in.
+              </span>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Cloudinary Configuration */}
+      {/* Cloudinary configuration */}
       <Card
         className={storageProvider === "cloudinary" ? "border-primary/50" : ""}
       >
@@ -591,8 +680,8 @@ export function StorageTab() {
               <CardTitle className="text-lg">
                 Cloudinary Configuration
               </CardTitle>
-              {storeSettings?.isCloudinaryConfigured && (
-                <div className="flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-medium">
+              {settings?.isCloudinaryConfigured && (
+                <div className="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
                   <Check className="h-3 w-3" /> Configured
                 </div>
               )}
@@ -611,21 +700,22 @@ export function StorageTab() {
                 }}
                 className="w-full md:w-auto"
               >
-                <Pencil className="w-4 h-4 mr-2" /> Edit Config
+                <Pencil className="mr-2 h-4 w-4" /> Edit Config
               </Button>
             ) : (
               <SettingsActions>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setIsEditingCloudinary(false)}
+                  onClick={hydrate}
                   className="w-full md:w-auto"
                 >
                   Cancel
                 </Button>
                 <Button
                   size="sm"
-                  onClick={handleSaveCloudinary}
+                  onClick={saveCloudinary}
+                  disabled={updateSettings.isPending}
                   className="w-full md:w-auto"
                 >
                   Save Config
@@ -639,7 +729,7 @@ export function StorageTab() {
             <div className="space-y-2">
               <Label>Cloud Name</Label>
               <Input
-                placeholder="dvx..."
+                placeholder="dxxxxxxxx"
                 value={cloudinaryCloudName}
                 onChange={(e) => setCloudinaryCloudName(e.target.value)}
                 disabled={!isEditingCloudinary}
@@ -648,7 +738,7 @@ export function StorageTab() {
             <div className="space-y-2">
               <Label>API Key</Label>
               <Input
-                placeholder="1234..."
+                placeholder="123456789012345"
                 value={cloudinaryApiKey}
                 onChange={(e) => setCloudinaryApiKey(e.target.value)}
                 disabled={!isEditingCloudinary}
@@ -659,14 +749,17 @@ export function StorageTab() {
               <Input
                 type="password"
                 placeholder={
-                  storeSettings?.isCloudinaryConfigured
+                  settings?.isCloudinaryConfigured
                     ? "•••••••• (Set successfully)"
-                    : "Enter API Secret"
+                    : "Enter API secret"
                 }
                 value={cloudinaryApiSecret}
                 onChange={(e) => setCloudinaryApiSecret(e.target.value)}
                 disabled={!isEditingCloudinary}
               />
+              <p className="text-xs text-muted-foreground">
+                Leave blank to keep the current secret.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Manual Storage Limit (GB)</Label>
@@ -680,14 +773,14 @@ export function StorageTab() {
                 disabled={!isEditingCloudinary}
               />
               <p className="text-xs text-muted-foreground">
-                Used only if Cloudinary does not return a quota limit.
+                Used only if Cloudinary does not report a quota of its own.
               </p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* R2 Configuration */}
+      {/* R2 configuration */}
       <Card className={storageProvider === "r2" ? "border-primary/50" : ""}>
         <CardHeader className="flex flex-col gap-4 space-y-0 border-b pb-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
@@ -695,8 +788,8 @@ export function StorageTab() {
               <CardTitle className="text-lg">
                 Cloudflare R2 Configuration
               </CardTitle>
-              {storeSettings?.isR2Configured && (
-                <div className="flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-medium">
+              {settings?.isR2Configured && (
+                <div className="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
                   <Check className="h-3 w-3" /> Configured
                 </div>
               )}
@@ -715,21 +808,22 @@ export function StorageTab() {
                 }}
                 className="w-full md:w-auto"
               >
-                <Pencil className="w-4 h-4 mr-2" /> Edit Config
+                <Pencil className="mr-2 h-4 w-4" /> Edit Config
               </Button>
             ) : (
               <SettingsActions>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setIsEditingR2(false)}
+                  onClick={hydrate}
                   className="w-full md:w-auto"
                 >
                   Cancel
                 </Button>
                 <Button
                   size="sm"
-                  onClick={handleSaveR2}
+                  onClick={saveR2}
+                  disabled={updateSettings.isPending}
                   className="w-full md:w-auto"
                 >
                   Save Config
@@ -761,9 +855,9 @@ export function StorageTab() {
               <Input
                 type="password"
                 placeholder={
-                  storeSettings?.isR2Configured
+                  settings?.isR2Configured
                     ? "•••••••• (Set successfully)"
-                    : "Enter Secret Key"
+                    : "Enter secret key"
                 }
                 value={r2SecretAccessKey}
                 onChange={(e) => setR2SecretAccessKey(e.target.value)}
@@ -779,6 +873,15 @@ export function StorageTab() {
               />
             </div>
             <div className="space-y-2">
+              <Label>S3 API Endpoint</Label>
+              <Input
+                value={r2Endpoint}
+                onChange={(e) => setR2Endpoint(e.target.value)}
+                placeholder="https://<account-id>.r2.cloudflarestorage.com"
+                disabled={!isEditingR2}
+              />
+            </div>
+            <div className="space-y-2">
               <Label>Public Domain URL (CDN)</Label>
               <Input
                 value={r2PublicUrl}
@@ -786,6 +889,9 @@ export function StorageTab() {
                 placeholder="https://pub-xxxx.r2.dev"
                 disabled={!isEditingR2}
               />
+              <p className="text-xs text-muted-foreground">
+                Uploads are unreachable without this — it forms the image URL.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Manual Storage Limit (GB)</Label>
@@ -799,7 +905,7 @@ export function StorageTab() {
                 disabled={!isEditingR2}
               />
               <p className="text-xs text-muted-foreground">
-                R2 is usage-based, so this limit is set by you for tracking.
+                R2 is usage-billed, so this limit is for your own tracking.
               </p>
             </div>
           </div>

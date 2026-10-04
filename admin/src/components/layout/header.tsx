@@ -18,11 +18,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useTheme } from "next-themes";
-import { signOut } from "@/lib/mock-auth";
+import { signOut, useSession } from "@/lib/mock-auth";
 import { useEffect, useState } from "react";
 import Cookies from "js-cookie";
 import { NotificationBell } from "./notification-bell";
-import { useProfile } from "@/hooks/use-profile";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -200,16 +199,17 @@ export function MobileNav() {
 export function Header() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  const { data: profile } = useProfile();
+  const { data: session } = useSession();
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  // The signed-in admin's display name comes from the auth session. (It used to
+  // come from a /profiles/me endpoint that this backend never had.)
+  const { firstName, lastName, name } = session.user;
   const adminName =
-    profile?.firstName && profile?.lastName
-      ? `${profile.firstName} ${profile.lastName}`
-      : profile?.firstName || "Admin";
+    firstName && lastName ? `${firstName} ${lastName}` : firstName || name || "Admin";
 
   return (
     <header className="sticky top-0 z-30 h-16 border-b border-border bg-background/80 backdrop-blur-md">

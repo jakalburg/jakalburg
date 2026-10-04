@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/router";
 import { ProductGrid } from "@/components/product/ProductGrid";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -68,11 +68,22 @@ export function CollectionView({ title, eyebrow, description, filters }: Props) 
     sort: search.sort,
   });
 
-  // Changing a filter or sort restarts at page 1. React Query does this for us
-  // by keying on the filters, but the window is also scrolled back to the top
-  // so the shopper isn't dropped into the middle of a fresh result set.
+  // Changing a filter or sort restarts at page 1 — React Query does that for us
+  // by keying on the filters.
+  //
+  // The scroll needs a nudge too, but NOT back to the top of the document: the
+  // filter sidebar sits beside the grid, so a shopper who filters from halfway
+  // down was thrown past the heading they had already scrolled by. Re-anchor to
+  // the results instead, and only when they've gone out of view above —
+  // filtering from the top of the page should not move anything at all.
+  const resultsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+    const node = resultsRef.current;
+    if (!node) return;
+    if (node.getBoundingClientRect().top < 0) {
+      // `scroll-mt-20` on the node keeps it clear of the sticky header.
+      node.scrollIntoView({ block: "start" });
+    }
   }, [search.size, search.color, search.sort]);
 
   const update = (patch: Partial<CollectionSearch>) => {
@@ -80,7 +91,13 @@ export function CollectionView({ title, eyebrow, description, filters }: Props) 
     (["size", "color", "sort"] as const).forEach((k) => {
       if (!next[k]) delete next[k];
     });
-    void router.push({ pathname: router.pathname, query: next }, undefined, { shallow: true });
+    // `scroll: false` matters as much as the effect above: Next scrolls to the
+    // top of the document on every push, shallow or not. Without it the effect
+    // can only ever re-anchor a page the router has already jumped.
+    void router.push({ pathname: router.pathname, query: next }, undefined, {
+      shallow: true,
+      scroll: false,
+    });
   };
 
   const filterControls = (
@@ -134,7 +151,7 @@ export function CollectionView({ title, eyebrow, description, filters }: Props) 
         {description && <p className="mt-3 max-w-2xl text-sm text-muted-foreground">{description}</p>}
       </header>
 
-      <div className="mb-6 flex items-center justify-between">
+      <div ref={resultsRef} className="mb-6 flex scroll-mt-20 items-center justify-between">
         <p className="text-xs text-mute-text">
           {isLoading ? "Loading…" : `${total} ${total === 1 ? "piece" : "pieces"}`}
         </p>

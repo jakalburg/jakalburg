@@ -81,3 +81,55 @@ export function useCreateOrder() {
     },
   });
 }
+
+/** What the server needs to open a Razorpay payment window. */
+export interface RazorpayOrder {
+  razorpayOrderId: string;
+  amount: number;
+  currency: string;
+  keyId: string;
+}
+
+/**
+ * Pay online, then place the order.
+ *
+ * Three server round-trips, in this order:
+ *   1. `razorpay-order` — the server prices the cart and opens a payable
+ *      order. Nothing is stored yet, so abandoning here costs nothing.
+ *   2. Razorpay's window collects the money (handled by the caller).
+ *   3. `verify-razorpay` — the server checks the signature with Razorpay and
+ *      only then writes the order.
+ *
+ * The order never exists until the money is verified, so there is no window in
+ * which an unpaid order can be mistaken for a real one.
+ */
+export function useRazorpayCheckout() {
+  const qc = useQueryClient();
+
+  return {
+    /** Step 1 — ask the server what to charge and get a payable order. */
+    createRazorpayOrder: (body: CreateOrderInput) =>
+      apiFetch<RazorpayOrder>(API_ENDPOINTS.payments.razorpayOrder, {
+        method: "POST",
+        body,
+        auth: true,
+      }),
+
+    /** Step 3 — prove the payment and receive the placed order. */
+    verifyAndPlace: async (payload: {
+      razorpayOrderId: string;
+      razorpayPaymentId: string;
+      razorpaySignature: string;
+      order: CreateOrderInput;
+    }) => {
+      const order = await apiFetch<MockOrder>(API_ENDPOINTS.payments.verifyRazorpay, {
+        method: "POST",
+        body: payload,
+        auth: true,
+      });
+      qc.setQueryData(orderKey(order.id), order);
+      void qc.invalidateQueries({ queryKey: ordersKey, refetchType: "all" });
+      return order;
+    },
+  };
+}

@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { X, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
+import { ImageRemoveButton } from "@/components/ui/image-remove-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -168,18 +169,15 @@ export function ColorImageManager({
                   {entry.color}
                 </span>
               </div>
-              <button
-                type="button"
+              <ImageRemoveButton
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   handleRemove(entry.id);
                 }}
-                className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm ring-2 ring-background z-10"
-                title={`Remove ${entry.color}`}
-              >
-                <X className="h-3 w-3" />
-              </button>
+                label={`Remove ${entry.color}`}
+                revealOnHover
+              />
             </div>
           ))}
         </div>

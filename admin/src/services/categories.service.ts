@@ -1,75 +1,104 @@
-import { AxiosInstance } from "axios";
+import { realApi } from "@/lib/api/real-axios";
+import API_ENDPOINTS from "@/config/endpoints";
+import {
+  MAX_PAGE_SIZE,
+  Paginated,
+  PaginationParams,
+  toPaginated,
+} from "@/types/pagination";
+
+/**
+ * Product categories — the REAL backend (server `Category` model).
+ *
+ * Previously this went through mockAxios against kaybykhushie's hierarchical
+ * jewellery shape (`parent`/`parentId`/`productType`). Jakalburg stores a
+ * product's category as one flat slug with gender held separately, so the
+ * model is flat with a `genders` scope instead of a parent tree.
+ *
+ * Note what this table is NOT: it does not own products. `Product.category`
+ * is still the source of truth for what a product is; these rows are the
+ * editorial layer (display name, artwork, ordering, whether to offer it).
+ */
+export type CategoryGender = "women" | "men" | "unisex";
 
 export interface Category {
   id: string;
-  parent: string;
-  parentId?: string | null;
-  img?: string;
-  productType?: string;
-  description?: string;
-  status?: string;
-  subCategories?: Category[];
+  name: string;
+  /** The value stored on products, e.g. "co-ord-sets". */
+  slug: string;
+  /** Empty means "any gender that has stock". */
+  genders: CategoryGender[];
+  description?: string | null;
+  image?: string | null;
+  isActive: boolean;
+  order: number;
+  /** Live products carrying this slug — server-derived. */
+  productCount?: number;
   createdAt?: string;
   updatedAt?: string;
 }
 
-export const categoriesService = (api: AxiosInstance) => ({
-  // Get all categories
-  async getAll(): Promise<Category[]> {
-    const response = await api.get("/categories");
-    return response.data;
-  },
+export interface CategoryInput {
+  name: string;
+  slug?: string;
+  genders?: CategoryGender[];
+  description?: string | null;
+  image?: string | null;
+  isActive?: boolean;
+  order?: number;
+}
 
-  // Get single category
-  async getById(id: string): Promise<Category> {
-    const response = await api.get(`/categories/${id}`);
-    return response.data;
-  },
-
-  // Create category
-  async create(data: Partial<Category>): Promise<Category> {
-    const response = await api.post("/categories", data);
-    return response.data;
-  },
-
-  // Create category with image file
-  async createWithMedia(
-    data: Partial<Category> & { file?: File },
-  ): Promise<Category> {
-    const formData = new FormData();
-
-    // Append category fields
-    if (data.parent) formData.append("parent", data.parent);
-    if (data.parentId) formData.append("parentId", data.parentId);
-    if (data.productType) formData.append("productType", data.productType);
-    if (data.description) formData.append("description", data.description);
-    if (data.status) formData.append("status", data.status);
-
-    // Append image file if present
-    if (data.file) {
-      formData.append("file", data.file);
-    }
-
-    const response = await api.post(
-      "/categories/create-with-media?mediaType=image",
-      formData,
-      {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
+export const categoriesService = {
+  /**
+   * Admin table: ONE page of categories (10 by default), including inactive
+   * rows and product counts. Search is applied server-side, so it matches rows
+   * that aren't on the page currently displayed.
+   */
+  async getAll(params?: PaginationParams): Promise<Paginated<Category>> {
+    const { data } = await realApi.get(API_ENDPOINTS.categories.adminList, {
+      params: {
+        page: params?.page,
+        limit: params?.limit,
+        search: params?.search?.trim() || undefined,
       },
+    });
+    return toPaginated<Category>(data, params?.limit);
+  },
+
+  /**
+   * Every category, for the filter dropdowns and pickers that have to offer
+   * all of them at once. Capped at the server's max page size — a <select>
+   * with more than 100 options has a bigger problem than pagination.
+   */
+  async listOptions(): Promise<Category[]> {
+    const page = await this.getAll({ page: 1, limit: MAX_PAGE_SIZE });
+    return page.data;
+  },
+
+  async getById(id: string): Promise<Category> {
+    const { data } = await realApi.get<Category>(
+      API_ENDPOINTS.categories.byId(id),
     );
-    return response.data;
+    return data;
   },
 
-  // Update category
-  async update(id: string, data: Partial<Category>): Promise<Category> {
-    const response = await api.put(`/categories/${id}`, data);
-    return response.data;
+  async create(input: CategoryInput): Promise<Category> {
+    const { data } = await realApi.post<Category>(
+      API_ENDPOINTS.categories.create,
+      input,
+    );
+    return data;
   },
 
-  // Delete category
+  async update(id: string, input: Partial<CategoryInput>): Promise<Category> {
+    const { data } = await realApi.patch<Category>(
+      API_ENDPOINTS.categories.update(id),
+      input,
+    );
+    return data;
+  },
+
   async delete(id: string): Promise<void> {
-    await api.delete(`/categories/${id}`);
+    await realApi.delete(API_ENDPOINTS.categories.delete(id));
   },
-});
+};

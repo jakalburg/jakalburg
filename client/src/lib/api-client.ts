@@ -23,6 +23,26 @@ export function getToken(): string | null {
   }
 }
 
+/** Cookie the maintenance middleware parks a verified preview token in. */
+const PREVIEW_COOKIE = "jb_preview";
+
+/**
+ * The maintenance preview token, if this browser has one.
+ *
+ * While maintenance is on the API answers 503 for everything, so an admin
+ * previewing the site needs every request to carry the token — otherwise they
+ * get the page shell and no data. The token is only ever a claim: the server
+ * verifies it against a stored hash on each request, so sending a made-up one
+ * achieves nothing.
+ */
+function getPreviewToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(
+    new RegExp(`(?:^|;\\s*)${PREVIEW_COOKIE}=([^;]*)`),
+  );
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 export function setToken(token: string): void {
   if (typeof window === "undefined") return;
   try {
@@ -69,11 +89,25 @@ function forceSignOut(): void {
 export class ApiError extends Error {
   status: number;
   requestId?: string;
-  constructor(message: string, status: number, requestId?: string) {
+  /**
+   * The parsed error body, when the server sent one.
+   *
+   * Some failures carry more than a message — a captured payment that couldn't
+   * be turned into an order comes back with a `reference` the shopper must be
+   * given. Flattening those to a string would throw that away.
+   */
+  body?: Record<string, unknown>;
+  constructor(
+    message: string,
+    status: number,
+    requestId?: string,
+    body?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.requestId = requestId;
+    this.body = body;
   }
 }
 
@@ -96,6 +130,8 @@ export async function apiFetch<T>(
     const token = getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
+  const preview = getPreviewToken();
+  if (preview) headers["x-maintenance-preview"] = preview;
 
   let res: Response;
   try {
@@ -132,7 +168,12 @@ export async function apiFetch<T>(
     const message =
       (Array.isArray(rawMessage) ? rawMessage[0] : rawMessage) ||
       "Something went wrong. Please try again.";
-    throw new ApiError(message, res.status, record.requestId);
+    throw new ApiError(
+      message,
+      res.status,
+      record.requestId,
+      (data ?? undefined) as Record<string, unknown> | undefined,
+    );
   }
 
   return data as T;

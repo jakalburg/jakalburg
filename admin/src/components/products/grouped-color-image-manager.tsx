@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { X, Plus, ChevronDown, ChevronUp, Palette } from "lucide-react";
+import { ImageRemoveButton } from "@/components/ui/image-remove-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -339,18 +340,14 @@ export function GroupedColorImageManager({
                             {entry.color}
                           </span>
                         </div>
-                        <button
-                          type="button"
+                        <ImageRemoveButton
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
                             handleRemoveColor(group.id, entry.id);
                           }}
-                          className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-full p-1 shadow-sm ring-2 ring-background z-10"
-                          title={`Remove ${entry.color}`}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
+                          label={`Remove ${entry.color}`}
+                        />
                       </div>
                     ))}
                   </div>

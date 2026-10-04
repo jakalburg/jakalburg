@@ -2,11 +2,11 @@
 
 import React from "react";
 
-import { DashboardStats } from "@/types/product";
+import type { DashboardStats } from "@/services/dashboard.service";
 import {
   TrendingUp,
   TrendingDown,
-  DollarSign,
+  IndianRupee,
   ShoppingCart,
   Package,
   Users,
@@ -19,35 +19,43 @@ interface StatsCardsProps {
 }
 
 export function StatsCards({ stats }: StatsCardsProps) {
+  // Captions differ by metric because the comparison does: revenue and orders
+  // are flows (this 30 days vs the 30 before), while products and customers are
+  // running totals (how much the count itself grew).
   const cards = [
     {
       title: "Total Revenue",
-      value: `₹${stats.totalRevenue.toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
+      // Whole rupees — the store prices in them, so trailing .00 is noise here.
+      value: `₹${stats.totalRevenue.toLocaleString("en-IN")}`,
       change: stats.revenueChange,
-      icon: DollarSign,
+      caption: "vs previous 30 days",
+      icon: IndianRupee,
       color: "text-chart-1",
       bgColor: "bg-chart-1/10",
     },
     {
       title: "Orders",
-      value: stats.totalOrders.toLocaleString(),
+      value: stats.totalOrders.toLocaleString("en-IN"),
       change: stats.ordersChange,
+      caption: "vs previous 30 days",
       icon: ShoppingCart,
       color: "text-chart-2",
       bgColor: "bg-chart-2/10",
     },
     {
       title: "Products",
-      value: stats.totalProducts.toLocaleString(),
+      value: stats.totalProducts.toLocaleString("en-IN"),
       change: stats.productsChange,
+      caption: "growth, last 30 days",
       icon: Package,
       color: "text-chart-3",
       bgColor: "bg-chart-3/10",
     },
     {
       title: "Customers",
-      value: stats.totalCustomers.toLocaleString(),
+      value: stats.totalCustomers.toLocaleString("en-IN"),
       change: stats.customersChange,
+      caption: "growth, last 30 days",
       icon: Users,
       color: "text-chart-4",
       bgColor: "bg-chart-4/10",
@@ -56,7 +64,7 @@ export function StatsCards({ stats }: StatsCardsProps) {
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      {cards.map((card, index) => {
+      {cards.map((card) => {
         const Icon = card.icon;
         const isPositive = card.change >= 0;
         const TrendIcon = isPositive ? TrendingUp : TrendingDown;
@@ -92,7 +100,7 @@ export function StatsCards({ stats }: StatsCardsProps) {
                   {Math.abs(card.change)}%
                 </span>
                 <span className="text-xs text-muted-foreground ml-1">
-                  vs last month
+                  {card.caption}
                 </span>
               </div>
             </CardContent>

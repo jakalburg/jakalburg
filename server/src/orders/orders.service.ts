@@ -9,6 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AddressDto } from '../common/dto/address.dto';
 import { CouponsService } from '../coupons/coupons.service';
 import { EmailService, OrderEmailData } from '../email/email.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationSettingsService } from '../notifications/notification-settings.service';
 import { SheetsService } from '../sheets/sheets.service';
 import {
   CreateOrderDto,
@@ -23,6 +25,19 @@ import {
 } from '../common/pagination';
 
 type OrderWithItems = Order & { items: OrderItem[] };
+
+/**
+ * A Razorpay payment the server has already proved: signature checked, the
+ * payment read back from Razorpay, and the captured amount matched against the
+ * order total. Only OrdersController.verifyRazorpay constructs one — nothing
+ * accepts these fields straight off a request body.
+ */
+export interface VerifiedPayment {
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  razorpaySignature: string;
+  razorpayMethod?: string;
+}
 
 const INCLUDE_ITEMS = { items: true } satisfies Prisma.OrderInclude;
 const MAX_ORDER_NUMBER_ATTEMPTS = 5;
@@ -65,12 +80,41 @@ export class OrdersService {
     private readonly coupons: CouponsService,
     private readonly email: EmailService,
     private readonly sheets: SheetsService,
+    private readonly notifications: NotificationsService,
+    private readonly notificationPrefs: NotificationSettingsService,
   ) {}
 
-  /** Create an order from the given lines. Prices/snapshots come from the LIVE
-   *  products (never the client) so totals can't be tampered with. The user's
-   *  cart is cleared in the same transaction. */
-  async create(userId: string, dto: CreateOrderDto): Promise<OrderResponseDto> {
+  /**
+   * The order already written for this Razorpay payment, if any.
+   *
+   * Razorpay's browser checkout can fire its success handler more than once
+   * (a retried request, a double-click, a reopened tab), and `verifyRazorpay`
+   * is a plain POST with no other guard. Without this lookup the second call
+   * would write a second order for one payment. `razorpayPaymentId` is unique
+   * in the schema, so the database refuses the duplicate even if two callbacks
+   * race past this check at the same moment.
+   */
+  async findByRazorpayPaymentId(
+    razorpayPaymentId: string,
+  ): Promise<OrderResponseDto | null> {
+    const existing = await this.prisma.order.findUnique({
+      where: { razorpayPaymentId },
+      include: INCLUDE_ITEMS,
+    });
+    return existing ? this.toResponse(existing) : null;
+  }
+
+  /**
+   * Price an order from the LIVE products — never from the client.
+   *
+   * Shared by `create()` and by the Razorpay flow, which has to know what to
+   * charge before any order exists. Both calling it is the point: the amount
+   * the customer is asked to pay and the amount later written to the order are
+   * produced by the same code, so they cannot drift.
+   *
+   * Throws 400 if a product vanished or the coupon no longer applies.
+   */
+  async priceOrder(dto: CreateOrderDto) {
     const ids = [...new Set(dto.items.map((i) => i.productId))];
     const products = await this.prisma.product.findMany({
       where: { id: { in: ids } },
@@ -109,6 +153,23 @@ export class OrdersService {
     const couponCode = applied?.couponCode ?? null;
     const total = Math.max(0, subtotal + shipping - discount);
 
+    return { items, subtotal, shipping, discount, couponCode, total, applied };
+  }
+
+  /** Create an order from the given lines. Prices/snapshots come from the LIVE
+   *  products (never the client) so totals can't be tampered with. The user's
+   *  cart is cleared in the same transaction.
+   *
+   *  `payment` carries the verified Razorpay details when the order was paid
+   *  online; omitted for COD. */
+  async create(
+    userId: string,
+    dto: CreateOrderDto,
+    payment?: VerifiedPayment,
+  ): Promise<OrderResponseDto> {
+    const { items, subtotal, shipping, discount, couponCode, total, applied } =
+      await this.priceOrder(dto);
+
     // Frozen snapshot of the shipping address (independent of later edits).
     const shippingAddress = { ...dto.address } as Prisma.InputJsonValue;
 
@@ -127,6 +188,17 @@ export class OrdersService {
             paymentLabel: dto.paymentLabel,
             shippingAddress,
             items: { create: items },
+            // A verified online payment, or COD awaiting collection.
+            paymentMethod: payment ? 'razorpay' : 'cod',
+            paymentStatus: payment ? 'paid' : 'cod_pending',
+            ...(payment
+              ? {
+                  razorpayOrderId: payment.razorpayOrderId,
+                  razorpayPaymentId: payment.razorpayPaymentId,
+                  razorpaySignature: payment.razorpaySignature,
+                  razorpayMethod: payment.razorpayMethod,
+                }
+              : {}),
           },
           include: INCLUDE_ITEMS,
         });
@@ -146,16 +218,25 @@ export class OrdersService {
       }),
     );
 
-    // Fire the confirmation (customer) + new-order (owner) emails, and mirror
-    // the order into the owner's Google Sheet. All three swallow their own
-    // failures and never throw, so flaky SMTP or a Google outage can't break
-    // checkout — the order is already committed either way. Awaited rather than
-    // left dangling because the serverless function can freeze the moment this
-    // response is returned, dropping any still-pending work.
+    // Fire the confirmation (customer) + new-order (owner) emails, raise the
+    // admin's bell alert, and mirror the order into the owner's Google Sheet.
+    // All of them swallow their own failures and never throw, so flaky SMTP or
+    // a Google outage can't break checkout — the order is already committed
+    // either way. Awaited rather than left dangling because the serverless
+    // function can freeze the moment this response is returned, dropping any
+    // still-pending work.
+    //
+    // The CUSTOMER's confirmation is not gated by any preference: it is the
+    // receipt for a purchase they just made, not a notification the shop opts
+    // into. Only the owner's copy answers to Settings → Notifications.
     const emailData = this.toOrderEmailData(order);
+    const prefs = await this.notificationPrefs.resolve();
     await Promise.all([
       this.email.sendOrderPlacedCustomerEmail(emailData),
-      this.email.sendOrderPlacedOwnerEmail(emailData),
+      prefs.emailOrderPlaced
+        ? this.email.sendOrderPlacedOwnerEmail(emailData)
+        : Promise.resolve(false),
+      this.notifications.orderPlaced(emailData),
       this.sheets.syncOrder(order),
     ]).catch(() => undefined);
 
@@ -337,14 +418,54 @@ export class OrdersService {
       // the row or reset its sync state.
       await this.sheets.syncOrderById(id);
     }
+    const emailData = this.toOrderEmailData(order);
+
+    // Bell alert only when the customer-facing status actually moved — a
+    // purely granular relabel (shipped → out_for_delivery) isn't a new event.
+    if (enumChanged) await this.notifyStatusChange(emailData, mapped);
+
+    // TWO independent gates on the customer email, and both must be open: the
+    // per-order "Notify customer" checkbox the admin just ticked, and the
+    // store-wide toggle for this status. `emailBlockedByPreference` is
+    // reported back so the UI can say why a ticked box sent nothing, rather
+    // than leaving the admin to assume the mail went out.
     let emailSent = false;
+    let emailBlockedByPreference = false;
     if (notify && enumChanged) {
-      emailSent = await this.email.sendOrderStatusUpdateEmail(
-        this.toOrderEmailData(order),
-        mapped,
-      );
+      if (await this.statusEmailAllowed(mapped)) {
+        emailSent = await this.email.sendOrderStatusUpdateEmail(
+          emailData,
+          mapped,
+        );
+      } else {
+        emailBlockedByPreference = true;
+      }
     }
-    return { success: true, statusChanged, emailSent };
+    return { success: true, statusChanged, emailSent, emailBlockedByPreference };
+  }
+
+  /**
+   * Whether Settings → Notifications allows a status email for `status`.
+   * Only `shipped` and `cancelled` have a toggle; for every other status the
+   * per-order checkbox alone decides.
+   */
+  private async statusEmailAllowed(status: OrderStatus): Promise<boolean> {
+    const prefs = await this.notificationPrefs.resolve();
+    if (status === OrderStatus.shipped) return prefs.emailOrderShipped;
+    if (status === OrderStatus.cancelled) return prefs.emailOrderCancelled;
+    return true;
+  }
+
+  /** Bell alert for the two transitions the admin can subscribe to. */
+  private async notifyStatusChange(
+    order: OrderEmailData,
+    status: OrderStatus,
+  ): Promise<void> {
+    if (status === OrderStatus.shipped) {
+      await this.notifications.orderShipped(order);
+    } else if (status === OrderStatus.cancelled) {
+      await this.notifications.orderCancelled(order);
+    }
   }
 
   /** Accept an order (→ processing). */
@@ -363,24 +484,34 @@ export class OrdersService {
   /** Reject an order → the terminal `cancelled` state (rejected and cancelled are
    *  the same outcome in this store). The reason isn't persisted (no column). */
   async adminReject(id: string, _reason?: string) {
-    await this.getAdminOrderOr404(id);
+    const order = await this.getAdminOrderOr404(id);
+    const wasCancelled = order.status === OrderStatus.cancelled;
     await this.prisma.order.update({
       where: { id },
       data: { status: OrderStatus.cancelled, adminStatus: 'rejected' },
     });
     await this.sheets.syncOrderById(id);
+    // Only on a real transition — re-rejecting an already-cancelled order
+    // shouldn't ring the bell twice.
+    if (!wasCancelled) {
+      await this.notifications.orderCancelled(this.toOrderEmailData(order));
+    }
     return { success: true };
   }
 
   /** Mark an order shipped. Tracking/courier details can't be persisted (no
    *  columns on the lean model), so only the status transition is stored. */
   async adminShip(id: string, _tracking?: unknown) {
-    await this.getAdminOrderOr404(id);
+    const order = await this.getAdminOrderOr404(id);
+    const wasShipped = order.status === OrderStatus.shipped;
     await this.prisma.order.update({
       where: { id },
       data: { status: OrderStatus.shipped, adminStatus: 'shipped' },
     });
     await this.sheets.syncOrderById(id);
+    if (!wasShipped) {
+      await this.notifications.orderShipped(this.toOrderEmailData(order));
+    }
     return { success: true };
   }
 

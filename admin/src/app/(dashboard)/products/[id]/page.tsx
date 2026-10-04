@@ -5,10 +5,10 @@ import {
   ChevronLeft,
   Edit,
   Trash2,
-  Package,
-  Tag,
   BadgePercent,
-  Layers,
+  Palette,
+  Star,
+  Images,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -20,16 +20,99 @@ import { ImageShimmer } from "@/components/ui/image-shimmer";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useAdminQuery } from "@/hooks/use-admin-query";
-import { productsService } from "@/services";
+import { productsService, type ProductColorInput } from "@/services";
 import useAxiosAuth from "@/hooks/use-axios-auth";
 import Loader from "@/components/ui/loader";
 import { useSession } from "@/lib/mock-auth";
 
-const statusColors = {
-  draft: "bg-gray-500/10 text-gray-500 border-gray-500/20",
-  published: "bg-green-500/10 text-green-500 border-green-500/20",
-  archived: "bg-orange-500/10 text-orange-500 border-orange-500/20",
+// ---------------------------------------------------------------------------
+// Read-only view of the LEAN product the server actually stores (see
+// server/prisma/models/Product.prisma): every column of Product plus the full
+// ProductColor[] set. Each colour is a variant in its own right — it may carry
+// its own images, sizes, sold-out set, price, compare-at and stock — and an
+// empty array / null there means "inherit the product-level value". That
+// inheritance is spelled out per field below rather than rendered as a blank,
+// because "no override" and "no value" look identical otherwise.
+// ---------------------------------------------------------------------------
+
+const money = (value: number) => `₹${Number(value).toFixed(2)}`;
+
+const formatDate = (value?: string | Date | null) => {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString("en-IN", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 };
+
+const toUrlList = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((x: unknown): x is string => typeof x === "string")
+    : [];
+
+/**
+ * Does this colour's gallery hold exactly the product-level photos, in order?
+ * That's the signature of the "base colour" the product form writes for the
+ * main photos — worth labelling so it doesn't read as a duplicate variant.
+ * Mirrors `isBaseColor` in product-form.tsx.
+ */
+const isBaseGallery = (colorImages: string[], productImages: string[]) =>
+  productImages.length > 0 &&
+  colorImages.length === productImages.length &&
+  colorImages.every((url, i) => url === productImages[i]);
+
+/** Label + value block, the layout the rest of the detail cards already use. */
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <p className="text-sm text-muted-foreground mb-1">{label}</p>
+      <div className="text-sm">{children}</div>
+    </div>
+  );
+}
+
+/** Size chips with the sold-out subset struck through. */
+function SizeChips({
+  sizes,
+  soldOutSizes,
+}: {
+  sizes: string[];
+  soldOutSizes: string[];
+}) {
+  if (sizes.length === 0) {
+    return <span className="text-sm text-muted-foreground">None</span>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {sizes.map((size) => {
+        const soldOut = soldOutSizes.includes(size);
+        return (
+          <Badge
+            key={size}
+            variant="outline"
+            title={soldOut ? "Sold out" : "In stock"}
+            className={cn(
+              "font-mono",
+              soldOut &&
+                "line-through text-red-500 border-red-500/20 bg-red-500/5",
+            )}
+          >
+            {size}
+          </Badge>
+        );
+      })}
+    </div>
+  );
+}
 
 function ViewProductPageContent({
   params,
@@ -54,9 +137,16 @@ function ViewProductPageContent({
     productsService(api).getById(id),
   );
 
-  // State for selected image
-  const [selectedImageIndex, setSelectedImageIndex] = useState<number>(0);
-  const [selectedColorImage, setSelectedColorImage] = useState<string | null>(null);
+  // Which gallery the big preview is showing: null = the product photos,
+  // otherwise the index of a colour. A colour with no images of its own falls
+  // back to the product photos, same as the storefront does.
+  const [activeColor, setActiveColor] = useState<number | null>(null);
+  const [activeIndex, setActiveIndex] = useState<number>(0);
+
+  const showColor = (index: number | null) => {
+    setActiveColor(index);
+    setActiveIndex(0);
+  };
 
   const handleDelete = async () => {
     if (confirm("Are you sure you want to delete this product?")) {
@@ -94,28 +184,43 @@ function ViewProductPageContent({
     );
   }
 
-  // Use media array from backend
-  const media = product.media || [];
-  const images = media.filter((m: any) => m.mediaType === "image");
-  const displayedImage = images[selectedImageIndex] || images[0];
+  const productImages = toUrlList(product.images);
+  const colors: ProductColorInput[] = Array.isArray(product.colors)
+    ? product.colors
+    : [];
+  const sizes = toUrlList(product.sizes);
+  const soldOutSizes = toUrlList(product.soldOutSizes);
+  const tags = toUrlList(product.tags);
+  // Prefer the array; fall back to the deprecated single slug so legacy rows
+  // still show their membership.
+  const collections = toUrlList(product.collections).length
+    ? toUrlList(product.collections)
+    : product.collection
+      ? [product.collection]
+      : [];
 
-  const hasDiscount =
-    product.listPrice && product.price && product.listPrice > product.price;
+  const activeColorImages =
+    activeColor !== null ? toUrlList(colors[activeColor]?.images) : [];
+  const gallery =
+    activeColor !== null && activeColorImages.length
+      ? activeColorImages
+      : productImages;
+  const displayedImage = gallery[activeIndex] ?? gallery[0];
+  const galleryLabel =
+    activeColor === null
+      ? "All product photos"
+      : activeColorImages.length
+        ? `${colors[activeColor]?.name} photos`
+        : `${colors[activeColor]?.name} — inherits the product photos`;
+
+  const price = Number(product.price ?? 0);
+  const compareAtPrice =
+    typeof product.compareAtPrice === "number" ? product.compareAtPrice : null;
+  const hasDiscount = compareAtPrice != null && compareAtPrice > price;
   const discountPct = hasDiscount
-    ? Math.round(
-        ((product.listPrice - product.price) / product.listPrice) * 100,
-      )
-    : product.discount || product.discountPercentage || 0;
-  const categoryName =
-    typeof product.category === "string"
-      ? product.category
-      : product.category?.name || "N/A";
-  const brandName =
-    typeof product.brand === "string"
-      ? product.brand
-      : product.brand?.name || product.brandName || null;
-  const tags = product.tags || [];
-  const relatedProducts = product.relatedProducts || [];
+    ? Math.round(((compareAtPrice - price) / compareAtPrice) * 100)
+    : 0;
+  const stock = Number(product.stock ?? 0);
 
   return (
     <div className="space-y-6">
@@ -129,10 +234,10 @@ function ViewProductPageContent({
           </Button>
           <div className="min-w-0">
             <h1 className="text-xl font-bold tracking-tight break-words sm:text-3xl">
-              {product.name}
+              {product.title ?? product.name}
             </h1>
-            <p className="text-muted-foreground mt-1">
-              Product details and information
+            <p className="text-muted-foreground mt-1 font-mono text-xs break-all">
+              /{product.slug}
             </p>
           </div>
         </div>
@@ -150,77 +255,122 @@ function ViewProductPageContent({
         </div>
       </div>
 
+      {/* Storefront flags — every boolean the product carries, in one row. */}
+      <div className="flex flex-wrap gap-2">
+        <Badge
+          variant="outline"
+          className={
+            product.isActive
+              ? "bg-green-500/10 text-green-600 border-green-500/20"
+              : "bg-orange-500/10 text-orange-500 border-orange-500/20"
+          }
+        >
+          {product.isActive ? "Active" : "Hidden"}
+        </Badge>
+        <Badge variant="outline" className="capitalize">
+          {product.gender}
+        </Badge>
+        {product.isNew && (
+          <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20" variant="outline">
+            New
+          </Badge>
+        )}
+        {product.onSale && (
+          <Badge className="bg-pink-500/10 text-pink-600 border-pink-500/20" variant="outline">
+            On sale
+          </Badge>
+        )}
+        {product.essential && (
+          <Badge className="bg-purple-500/10 text-purple-600 border-purple-500/20" variant="outline">
+            Essential
+          </Badge>
+        )}
+        <Badge
+          variant="outline"
+          className={
+            product.reviewsHidden
+              ? "bg-muted text-muted-foreground"
+              : "bg-green-500/10 text-green-600 border-green-500/20"
+          }
+        >
+          {product.reviewsHidden ? "Reviews hidden" : "Reviews shown"}
+        </Badge>
+      </div>
+
       <div className="grid gap-6 md:grid-cols-2">
         {/* Images */}
         <Card className="">
           <CardHeader>
-            <CardTitle>Product Images</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Images className="h-5 w-5" />
+              Product Images
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {displayedImage ? (
               <div className="space-y-4">
                 <ImageShimmer
-                  src={selectedColorImage || displayedImage.publicUrl}
-                  alt={product.name}
+                  src={displayedImage}
+                  alt={product.title ?? product.name}
                   wrapperClassName="aspect-square w-full rounded-lg"
                 />
-                {images.length > 1 && (
+                <p className="text-xs text-muted-foreground">{galleryLabel}</p>
+                {gallery.length > 1 && (
                   <div className="grid grid-cols-4 gap-2">
-                    {images.map((image: any, index: number) => (
+                    {gallery.map((url: string, index: number) => (
                       <div
-                        key={image.id}
-                        onClick={() => { setSelectedImageIndex(index); setSelectedColorImage(null); }}
+                        key={`${url}-${index}`}
+                        onClick={() => setActiveIndex(index)}
                         className={cn(
                           "rounded-md overflow-hidden border-2 cursor-pointer transition-all hover:border-primary/50",
-                          index === selectedImageIndex && !selectedColorImage
+                          index === activeIndex
                             ? "border-primary ring-2 ring-primary/20"
                             : "border-border",
                         )}
                       >
                         <ImageShimmer
-                          src={image.publicUrl}
-                          alt={product.name}
+                          src={url}
+                          alt={`${product.title ?? product.name} ${index + 1}`}
                           wrapperClassName="aspect-square w-full"
                         />
                       </div>
                     ))}
                   </div>
                 )}
-                {/* Color swatches for Steal Deal products */}
-                {product.isStealDeal && product.colorImages && product.colorImages.length > 0 && (
-                  <div className="space-y-3 pt-2 border-t">
-                    <p className="text-sm font-medium text-muted-foreground">Product Colors</p>
-                    {(() => {
-                      const colorData = product.colorImages;
-                      const isGrouped = colorData[0]?.productName && colorData[0]?.colors;
-                      const groups = isGrouped
-                        ? colorData.filter((g: any) => g.colors?.length > 0)
-                        : [{ productName: "Colors", colors: colorData }];
-                      return groups.map((group: any) => (
-                        <div key={group.productName} className="space-y-1.5">
-                          <span className="text-xs font-medium text-foreground">
-                            {group.productName}
-                          </span>
-                          <div className="flex flex-wrap gap-2">
-                            {group.colors.map((c: any, idx: number) => (
-                              <button
-                                key={`${c.color}-${idx}`}
-                                type="button"
-                                onClick={() => setSelectedColorImage(c.imageUrl)}
-                                title={c.color}
-                                className={cn(
-                                  "w-7 h-7 rounded-full border-2 transition-all hover:scale-110",
-                                  selectedColorImage === c.imageUrl
-                                    ? "border-primary ring-2 ring-primary/20 scale-110"
-                                    : "border-border"
-                                )}
-                                style={{ backgroundColor: c.hexCode || "#ccc" }}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      ));
-                    })()}
+                {colors.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t">
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Preview a colour
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => showColor(null)}
+                        className={cn(
+                          "rounded-md border px-2 py-1 text-xs transition-colors",
+                          activeColor === null
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border hover:border-primary/50",
+                        )}
+                      >
+                        All photos
+                      </button>
+                      {colors.map((c, i) => (
+                        <button
+                          key={`${c.name}-${i}`}
+                          type="button"
+                          onClick={() => showColor(i)}
+                          title={`${c.name} (${c.hex})`}
+                          className={cn(
+                            "w-7 h-7 rounded-full border-2 transition-all hover:scale-110",
+                            activeColor === i
+                              ? "border-primary ring-2 ring-primary/20 scale-110"
+                              : "border-border",
+                          )}
+                          style={{ backgroundColor: c.hex || "#ccc" }}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -239,58 +389,49 @@ function ViewProductPageContent({
               <CardTitle>Basic Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">
-                  Description
-                </p>
-                <p className="text-sm">{product.description}</p>
-              </div>
-              {product.sku && (
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">SKU</p>
-                  <p className="text-sm font-mono">{product.sku}</p>
-                </div>
-              )}
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">Category</p>
-                <Badge variant="outline">{categoryName}</Badge>
-              </div>
-              {brandName && (
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">Brand</p>
-                  <Badge variant="outline" className="gap-1">
-                    <Tag className="h-3 w-3" />
-                    {brandName}
-                  </Badge>
-                </div>
-              )}
-              {tags.length > 0 && (
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">Tags</p>
+              <Field label="Description">
+                <p className="whitespace-pre-line">{product.description}</p>
+              </Field>
+              <Field label="Category">
+                <Badge variant="outline">{product.category || "—"}</Badge>
+              </Field>
+              <Field label="Gender">
+                <Badge variant="outline" className="capitalize">
+                  {product.gender}
+                </Badge>
+              </Field>
+              <Field label="Collections">
+                {collections.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
-                    {tags.map((tag: string) => (
+                    {collections.map((slug) => (
+                      <Badge key={slug} variant="secondary">
+                        {slug}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">None</span>
+                )}
+              </Field>
+              <Field label="Tags">
+                {tags.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {tags.map((tag) => (
                       <Badge key={tag} variant="secondary">
                         {tag}
                       </Badge>
                     ))}
                   </div>
-                </div>
-              )}
-              {product.status && (
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">Status</p>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      statusColors[
-                        product.status as keyof typeof statusColors
-                      ] || "",
-                    )}
-                  >
-                    {product.status}
-                  </Badge>
-                </div>
-              )}
+                ) : (
+                  <span className="text-muted-foreground">None</span>
+                )}
+              </Field>
+              <Field label="Fabric">
+                <p className="whitespace-pre-line">{product.fabric || "—"}</p>
+              </Field>
+              <Field label="Care instructions">
+                <p className="whitespace-pre-line">{product.care || "—"}</p>
+              </Field>
             </CardContent>
           </Card>
 
@@ -298,17 +439,17 @@ function ViewProductPageContent({
             <CardHeader>
               <CardTitle>Pricing & Inventory</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <Table>
                 <TableBody>
-                  {/* Original / List Price */}
-                  {product.listPrice != null && (
+                  {/* Compare-at / strike-through price */}
+                  {compareAtPrice != null && (
                     <TableRow>
                       <TableCell className="font-medium">
-                        Original Price
+                        Compare-at Price
                       </TableCell>
                       <TableCell className="text-right text-muted-foreground line-through">
-                        ₹{Number(product.listPrice).toFixed(2)}
+                        {money(compareAtPrice)}
                       </TableCell>
                     </TableRow>
                   )}
@@ -316,10 +457,7 @@ function ViewProductPageContent({
                   <TableRow>
                     <TableCell className="font-medium">Selling Price</TableCell>
                     <TableCell className="text-right font-bold text-primary">
-                      ₹
-                      {Number(
-                        product.price ?? product.originalPrice ?? 0,
-                      ).toFixed(2)}
+                      {money(price)}
                     </TableCell>
                   </TableRow>
                   {/* Discount % */}
@@ -348,18 +486,12 @@ function ViewProductPageContent({
                       <span
                         className={cn(
                           "font-medium",
-                          (product.stockQuantity ?? product.quantity ?? 0) ===
-                            0 && "text-red-500",
-                          (product.stockQuantity ?? product.quantity ?? 0) >
-                            0 &&
-                            (product.stockQuantity ?? product.quantity ?? 0) <
-                              10 &&
-                            "text-orange-500",
-                          (product.stockQuantity ?? product.quantity ?? 0) >=
-                            10 && "text-green-600",
+                          stock === 0 && "text-red-500",
+                          stock > 0 && stock < 10 && "text-orange-500",
+                          stock >= 10 && "text-green-600",
                         )}
                       >
-                        {product.stockQuantity ?? product.quantity ?? 0}
+                        {stock}
                       </span>
                     </TableCell>
                   </TableRow>
@@ -370,129 +502,293 @@ function ViewProductPageContent({
                       <Badge
                         variant="outline"
                         className={
-                          product.inStock
+                          stock > 0
                             ? "bg-green-500/10 text-green-600 border-green-500/20"
                             : "bg-red-500/10 text-red-500 border-red-500/20"
                         }
                       >
-                        {product.inStock ? "Yes" : "No"}
+                        {stock > 0 ? "Yes" : "No"}
                       </Badge>
                     </TableCell>
                   </TableRow>
                   {/* Currency */}
-                  {product.currency && (
-                    <TableRow>
-                      <TableCell className="font-medium">Currency</TableCell>
-                      <TableCell className="text-right">
-                        {product.currency}
-                      </TableCell>
-                    </TableRow>
-                  )}
+                  <TableRow>
+                    <TableCell className="font-medium">Currency</TableCell>
+                    <TableCell className="text-right">
+                      {product.currency ?? "INR"}
+                    </TableCell>
+                  </TableRow>
                 </TableBody>
               </Table>
+
+              <Field label="Sizes (sold-out struck through)">
+                <SizeChips sizes={sizes} soldOutSizes={soldOutSizes} />
+              </Field>
             </CardContent>
           </Card>
         </div>
       </div>
 
-      {/* Product Options */}
-      {relatedProducts.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Layers className="h-5 w-5" />
-              Product Options
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-              {relatedProducts.map((rp: any) => {
-                const rpImage = rp.img || rp.thumbnail || null;
+      {/* Colour variants — the product's only real variant axis. Each colour
+          can override images / sizes / price / compare-at / stock; anything it
+          leaves empty inherits the product-level value shown above. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Palette className="h-5 w-5" />
+            Colour Variants
+            <Badge variant="secondary">{colors.length}</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {colors.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              This product has no colour variants.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {colors.map((c, i) => {
+                const colorImages = toUrlList(c.images);
+                const inheritsImages = colorImages.length === 0;
+                const base = isBaseGallery(colorImages, productImages);
+                const shownImages = inheritsImages ? productImages : colorImages;
+                const colorSizes = toUrlList(c.sizes);
+                const colorSoldOut = toUrlList(c.soldOutSizes);
+                const inheritsSizes = colorSizes.length === 0;
+
                 return (
-                  <Link
-                    key={rp.id}
-                    href={`/products/${rp.id}`}
-                    className="group"
+                  <div
+                    key={`${c.name}-${i}`}
+                    className={cn(
+                      "rounded-lg border p-4 space-y-4 transition-colors",
+                      activeColor === i && "border-primary",
+                    )}
                   >
-                    <div className="rounded-lg border overflow-hidden hover:border-primary transition-colors">
-                      <div className="aspect-square bg-muted relative">
-                        {rpImage ? (
-                          <ImageShimmer
-                            src={rpImage}
-                            alt={rp.name}
-                            wrapperClassName="absolute inset-0"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <Package className="h-8 w-8 text-muted-foreground" />
-                          </div>
+                    {/* Identity */}
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => showColor(i)}
+                        title={`Preview ${c.name}`}
+                        className={cn(
+                          "w-9 h-9 rounded-full border-2 shrink-0 transition-all hover:scale-110",
+                          activeColor === i
+                            ? "border-primary ring-2 ring-primary/20"
+                            : "border-border",
                         )}
-                      </div>
-                      <div className="p-2">
-                        <p className="text-sm font-medium truncate group-hover:text-primary transition-colors">
-                          {rp.name}
+                        style={{ backgroundColor: c.hex || "#ccc" }}
+                      />
+                      <div className="min-w-0">
+                        <p className="font-medium">{c.name}</p>
+                        <p className="text-xs text-muted-foreground font-mono">
+                          {c.hex}
                         </p>
-                        <p className="text-xs text-muted-foreground">
-                          ₹{Number(rp.price ?? 0).toFixed(2)}
-                        </p>
                       </div>
+                      {base && (
+                        <Badge variant="outline" title="This colour's gallery is the product's main photos">
+                          Main photos
+                        </Badge>
+                      )}
+                      {/* The server orders colours by `position` but doesn't
+                          serialise it, so the index IS the display order. */}
+                      <span
+                        className="ml-auto text-xs text-muted-foreground"
+                        title="Display order on the storefront"
+                      >
+                        #{i + 1}
+                      </span>
                     </div>
-                  </Link>
+
+                    {/* Images */}
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Images{" "}
+                        {inheritsImages && (
+                          <span className="text-xs">
+                            — none of its own, inherits the product photos
+                          </span>
+                        )}
+                      </p>
+                      {shownImages.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {shownImages.map((url, idx) => (
+                            <div
+                              key={`${url}-${idx}`}
+                              onClick={() => {
+                                showColor(i);
+                                setActiveIndex(idx);
+                              }}
+                              className={cn(
+                                "w-16 h-16 rounded-md overflow-hidden border cursor-pointer transition-colors hover:border-primary",
+                                inheritsImages && "opacity-60",
+                              )}
+                            >
+                              <ImageShimmer
+                                src={url}
+                                alt={`${c.name} ${idx + 1}`}
+                                wrapperClassName="w-16 h-16"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">
+                          No images
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Sizes */}
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">
+                        Sizes{" "}
+                        {inheritsSizes && (
+                          <span className="text-xs">
+                            — none of its own, inherits the product sizes
+                          </span>
+                        )}
+                      </p>
+                      <SizeChips
+                        sizes={inheritsSizes ? sizes : colorSizes}
+                        soldOutSizes={
+                          inheritsSizes ? soldOutSizes : colorSoldOut
+                        }
+                      />
+                    </div>
+
+                    {/* Numeric overrides */}
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <Field label="Price">
+                        {typeof c.price === "number" ? (
+                          <span className="font-medium">{money(c.price)}</span>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            Inherits {money(price)}
+                          </span>
+                        )}
+                      </Field>
+                      <Field label="Compare-at price">
+                        {typeof c.compareAtPrice === "number" ? (
+                          <span className="font-medium line-through text-muted-foreground">
+                            {money(c.compareAtPrice)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            {compareAtPrice != null
+                              ? `Inherits ${money(compareAtPrice)}`
+                              : "Inherits none"}
+                          </span>
+                        )}
+                      </Field>
+                      <Field label="Stock">
+                        {typeof c.stock === "number" ? (
+                          <span
+                            className={cn(
+                              "font-medium",
+                              c.stock === 0 && "text-red-500",
+                              c.stock > 0 && c.stock < 10 && "text-orange-500",
+                              c.stock >= 10 && "text-green-600",
+                            )}
+                          >
+                            {c.stock}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            Inherits {stock}
+                          </span>
+                        )}
+                      </Field>
+                    </div>
+                  </div>
                 );
               })}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
-      {/* Additional Information */}
-      {product.additionalInfo && product.additionalInfo.length > 0 && (
-        <Card className="">
+      {/* Reviews + record metadata */}
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card>
           <CardHeader>
-            <CardTitle>Additional Information</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Star className="h-5 w-5" />
+              Reviews
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
               <TableBody>
-                {product.additionalInfo.map((info: any) => (
-                  <TableRow key={info.id}>
-                    <TableCell className="font-medium">{info.key}</TableCell>
-                    <TableCell>{info.value}</TableCell>
-                  </TableRow>
-                ))}
+                <TableRow>
+                  <TableCell className="font-medium">Average Rating</TableCell>
+                  <TableCell className="text-right">
+                    {Number(product.avgRating ?? 0).toFixed(1)} / 5
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="font-medium">
+                    Approved Reviews
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {product.reviewCount ?? 0}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="font-medium">On Storefront</TableCell>
+                  <TableCell className="text-right">
+                    <Badge
+                      variant="outline"
+                      className={
+                        product.reviewsHidden
+                          ? "bg-muted text-muted-foreground"
+                          : "bg-green-500/10 text-green-600 border-green-500/20"
+                      }
+                    >
+                      {product.reviewsHidden ? "Hidden" : "Shown"}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
               </TableBody>
             </Table>
           </CardContent>
         </Card>
-      )}
 
-      {/* SEO */}
-      {product.seo &&
-        (product.seo.metaTitle || product.seo.metaDescription) && (
-          <Card className="">
-            <CardHeader>
-              <CardTitle>SEO Information</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {product.seo.metaTitle && (
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">
-                    Meta Title
-                  </p>
-                  <p className="text-sm">{product.seo.metaTitle}</p>
-                </div>
-              )}
-              {product.seo.metaDescription && (
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">
-                    Meta Description
-                  </p>
-                  <p className="text-sm">{product.seo.metaDescription}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
+        <Card>
+          <CardHeader>
+            <CardTitle>Record</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableBody>
+                <TableRow>
+                  <TableCell className="font-medium">ID</TableCell>
+                  <TableCell className="text-right font-mono text-xs break-all">
+                    {product.id}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="font-medium">Slug</TableCell>
+                  <TableCell className="text-right font-mono text-xs break-all">
+                    {product.slug}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="font-medium">Created</TableCell>
+                  <TableCell className="text-right">
+                    {formatDate(product.createdAt)}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="font-medium">Last Updated</TableCell>
+                  <TableCell className="text-right">
+                    {formatDate(product.updatedAt)}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

@@ -1,48 +1,110 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
-import { env } from '../config/env';
+import { StorageSettingsService } from './storage-settings.service';
 
 /**
  * CloudinaryService
  *
- * Thin wrapper over the Cloudinary SDK. Configured once from environment
- * credentials at module init (Jakalburg keeps creds in server/.env — unlike
- * the kaybykhushie reference, which pulls them from a DB Settings row and also
- * supports R2). Uploads image buffers and returns the secure delivery URL.
+ * Thin wrapper over the Cloudinary SDK. Credentials come from the
+ * StorageSettings singleton (seeded from CLOUDINARY_* on first read, then
+ * editable in Settings → Media), so changing them takes effect on the next
+ * upload rather than the next deploy.
+ *
+ * The SDK holds its configuration in a module-level global, so `apply()` is
+ * called before every operation and re-applies only when the resolved
+ * credentials have actually changed.
  */
 @Injectable()
-export class CloudinaryService implements OnModuleInit {
+export class CloudinaryService {
   private readonly logger = new Logger(CloudinaryService.name);
+
+  /** Identity of the credentials currently pushed into the SDK. */
+  private appliedKey = '';
   private configured = false;
 
-  onModuleInit(): void {
-    if (env.isCloudinaryConfigured) {
-      cloudinary.config({
-        cloud_name: env.CLOUDINARY_CLOUD_NAME,
-        api_key: env.CLOUDINARY_API_KEY,
-        api_secret: env.CLOUDINARY_API_SECRET,
-        secure: true,
-      });
-      this.configured = true;
-      this.logger.log(
-        `Cloudinary configured for cloud: ${env.CLOUDINARY_CLOUD_NAME}`,
-      );
-    } else {
-      this.logger.warn(
-        'Cloudinary credentials missing — image uploads will fail until ' +
-          'CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET are set in server/.env.',
-      );
+  constructor(private readonly storageSettings: StorageSettingsService) {}
+
+  /**
+   * Push the current credentials into the SDK. Returns whether Cloudinary is
+   * usable. Cheap to call repeatedly — the resolve() behind it is memoised and
+   * the SDK is only touched when something changed.
+   */
+  private async apply(): Promise<boolean> {
+    const { cloudinary: config } = await this.storageSettings.resolve();
+
+    if (!config.configured) {
+      this.configured = false;
+      this.appliedKey = '';
+      return false;
     }
+
+    const key = `${config.cloudName}:${config.apiKey}:${config.apiSecret}`;
+    if (key === this.appliedKey) return true;
+
+    cloudinary.config({
+      cloud_name: config.cloudName,
+      api_key: config.apiKey,
+      api_secret: config.apiSecret,
+      secure: true,
+      // The SDK's default is short enough that a few-hundred-KB upload on a
+      // slow link gives up with "Request Timeout". Uploads are interactive
+      // (an admin is waiting), so prefer waiting over failing.
+      timeout: 120_000,
+    });
+    this.appliedKey = key;
+    this.configured = true;
+    this.logger.log(`Cloudinary configured for cloud: ${config.cloudName}`);
+    return true;
   }
 
-  isConfigured(): boolean {
-    return this.configured;
+  /** Whether Cloudinary has usable credentials right now. */
+  async isConfigured(): Promise<boolean> {
+    return this.apply();
   }
+
+  /**
+   * Open an authenticated session without transferring anything, and report
+   * account storage usage. Backs the admin's Verify button and usage bar.
+   */
+  async ping(): Promise<void> {
+    if (!(await this.apply())) {
+      throw new Error('Cloudinary is not configured.');
+    }
+    await cloudinary.api.ping();
+  }
+
+  /** Account-level storage usage straight from Cloudinary. */
+  async usage(): Promise<{
+    usedBytes: number | null;
+    limitBytes: number | null;
+    fileCount: number | null;
+  }> {
+    if (!(await this.apply())) {
+      throw new Error('Cloudinary is not configured.');
+    }
+    const report = (await cloudinary.api.usage()) as {
+      storage?: { usage?: number; limit?: number };
+      resources?: number;
+    };
+    return {
+      usedBytes: report?.storage?.usage ?? null,
+      limitBytes: report?.storage?.limit ?? null,
+      fileCount: report?.resources ?? null,
+    };
+  }
+
+  /** How many times to re-attempt an upload that timed out. */
+  private static readonly MAX_ATTEMPTS = 3;
 
   /**
    * Upload a file buffer to Cloudinary and return its secure URL + public id.
    * Applies f_auto,q_auto delivery so browsers that can't render the source
    * format (e.g. iPhone HEIC) still get a compatible image.
+   *
+   * Retries on timeout: Cloudinary intermittently drops a connection mid-upload
+   * and an admin shouldn't lose a whole form to a transient network blip.
+   * Non-timeout failures (bad credentials, rejected format) fail immediately —
+   * retrying those just wastes the admin's time.
    */
   async upload(
     buffer: Buffer,
@@ -50,12 +112,48 @@ export class CloudinaryService implements OnModuleInit {
     fileName: string,
     mimeType: string,
   ): Promise<{ url: string; publicId: string }> {
-    if (!this.configured) {
+    if (!(await this.apply())) {
       throw new Error(
-        'Cloudinary is not configured. Set CLOUDINARY_* in server/.env.',
+        'Cloudinary is not configured. Add the cloud name, API key and API ' +
+          'secret in Settings → Media (or set CLOUDINARY_* in server/.env).',
       );
     }
 
+    let lastError: Error | undefined;
+
+    for (let attempt = 1; attempt <= CloudinaryService.MAX_ATTEMPTS; attempt++) {
+      try {
+        return await this.uploadOnce(buffer, folder, fileName, mimeType);
+      } catch (error) {
+        lastError = error as Error;
+        if (!this.isTimeout(lastError)) break;
+
+        this.logger.warn(
+          `Cloudinary upload timed out for "${fileName}" ` +
+            `(attempt ${attempt}/${CloudinaryService.MAX_ATTEMPTS})`,
+        );
+      }
+    }
+
+    this.logger.error(
+      `Cloudinary upload failed for "${fileName}": ${lastError?.message ?? 'no result'}`,
+    );
+    throw lastError ?? new Error('Cloudinary upload returned no result');
+  }
+
+  /** True for the transient "Request Timeout" the SDK surfaces on a slow link. */
+  private isTimeout(error: Error): boolean {
+    const code = (error as { http_code?: number }).http_code;
+    return code === 499 || /timeout/i.test(error.message ?? '');
+  }
+
+  /** A single upload attempt. */
+  private uploadOnce(
+    buffer: Buffer,
+    folder: string,
+    fileName: string,
+    mimeType: string,
+  ): Promise<{ url: string; publicId: string }> {
     const resourceType = mimeType.startsWith('video/') ? 'video' : 'image';
     const baseName = fileName.replace(/\.[^/.]+$/, '').replace(/[^\w-]+/g, '-');
 
@@ -65,12 +163,10 @@ export class CloudinaryService implements OnModuleInit {
           folder: `jakalburg/${folder}`,
           resource_type: resourceType,
           public_id: `${Date.now()}-${baseName}`,
+          timeout: 120_000,
         },
         (error, result?: UploadApiResponse) => {
           if (error || !result) {
-            this.logger.error(
-              `Cloudinary upload failed: ${error?.message ?? 'no result'}`,
-            );
             reject(error ?? new Error('Cloudinary upload returned no result'));
             return;
           }
@@ -87,7 +183,7 @@ export class CloudinaryService implements OnModuleInit {
 
   /** Delete a file from Cloudinary by public id. Best-effort. */
   async delete(publicId: string, resourceType = 'image'): Promise<void> {
-    if (!this.configured) {
+    if (!(await this.apply())) {
       this.logger.warn('Cloudinary not configured, skipping delete.');
       return;
     }

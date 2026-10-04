@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -12,114 +12,84 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
+  usePaymentSettings,
+  useUpdatePaymentSettings,
+} from "@/hooks/use-payment-settings";
 import { toast } from "sonner";
-import { Banknote, Check, IndianRupee, Pencil } from "lucide-react";
+import { AlertTriangle, Banknote, Check, CreditCard, Pencil } from "lucide-react";
 import { SettingsActions } from "./settings-layout";
 
+/**
+ * Settings → Payments: which methods checkout offers, and the Razorpay
+ * credentials behind the online one.
+ *
+ * Whatever is switched on here is exactly what a customer sees at checkout —
+ * there is no second list to keep in sync. Razorpay additionally needs both
+ * keys before it counts as live; the server refuses to advertise it otherwise,
+ * so a toggle can never send a shopper to a checkout that cannot open.
+ */
 export function PaymentsTab() {
-  const { data: storeSettings, isLoading } = useSettings();
-  const updateStoreMutation = useUpdateSettings();
+  const { data: settings, isLoading } = usePaymentSettings();
+  const updateMutation = useUpdatePaymentSettings();
 
   const [isEditing, setIsEditing] = useState(false);
-  const [enablePartialCOD, setEnablePartialCOD] = useState(false);
-  const [partialCODMode, setPartialCODMode] = useState<"fixed" | "percentage">(
-    "fixed",
-  );
-  // Displayed/edited in rupees; converted to/from integer paise at the API
-  // boundary (partialCODFixedAmountPaise) — money is never stored as Float.
-  const [partialCODFixedAmount, setPartialCODFixedAmount] = useState("500");
-  const [partialCODPercentage, setPartialCODPercentage] = useState("20");
-  const [enableRazorpay, setEnableRazorpay] = useState(false);
-  const [enableWhatsApp, setEnableWhatsApp] = useState(false);
-  const [whatsappNumber, setWhatsappNumber] = useState("");
+  const [codEnabled, setCodEnabled] = useState(true);
+  const [razorpayEnabled, setRazorpayEnabled] = useState(false);
   const [razorpayKeyId, setRazorpayKeyId] = useState("");
+  // Always starts blank: the server never returns the stored secret, and a
+  // blank value means "keep it".
   const [razorpayKeySecret, setRazorpayKeySecret] = useState("");
 
-  useEffect(() => {
-    if (storeSettings) {
-      setEnablePartialCOD(
-        storeSettings.enablePartialCOD ?? storeSettings.enableCOD ?? false,
-      );
-      setPartialCODMode(storeSettings.partialCODMode ?? "fixed");
-      setPartialCODFixedAmount(
-        String((storeSettings.partialCODFixedAmountPaise ?? 50000) / 100),
-      );
-      setPartialCODPercentage(String(storeSettings.partialCODPercentage ?? 20));
-      setEnableRazorpay(storeSettings.enableRazorpay ?? false);
-      setEnableWhatsApp(storeSettings.enableWhatsApp ?? false);
-      setWhatsappNumber(storeSettings.whatsappNumber || "");
-      setRazorpayKeyId(storeSettings.razorpayKeyId || "");
-      setRazorpayKeySecret("");
-    }
-  }, [storeSettings]);
+  const resetFromServer = useCallback(() => {
+    if (!settings) return;
+    setCodEnabled(settings.codEnabled);
+    setRazorpayEnabled(settings.razorpayEnabled);
+    setRazorpayKeyId(settings.razorpayKeyId || "");
+    setRazorpayKeySecret("");
+  }, [settings]);
+
+  useEffect(resetFromServer, [resetFromServer]);
 
   const handleCancel = () => {
     setIsEditing(false);
-    if (storeSettings) {
-      setEnablePartialCOD(
-        storeSettings.enablePartialCOD ?? storeSettings.enableCOD ?? false,
-      );
-      setPartialCODMode(storeSettings.partialCODMode ?? "fixed");
-      setPartialCODFixedAmount(
-        String((storeSettings.partialCODFixedAmountPaise ?? 50000) / 100),
-      );
-      setPartialCODPercentage(String(storeSettings.partialCODPercentage ?? 20));
-      setEnableRazorpay(storeSettings.enableRazorpay ?? false);
-      setEnableWhatsApp(storeSettings.enableWhatsApp ?? false);
-      setWhatsappNumber(storeSettings.whatsappNumber || "");
-      setRazorpayKeyId(storeSettings.razorpayKeyId || "");
-      setRazorpayKeySecret("");
-    }
+    resetFromServer();
   };
 
-  const handleSavePayments = () => {
-    const fixedAmountRupees = Number(partialCODFixedAmount);
-    const percentage = Math.round(Number(partialCODPercentage));
+  // Will Razorpay actually be usable once saved? Mirrors the server's rule.
+  const secretWillBeSet = Boolean(razorpayKeySecret) || Boolean(settings?.isRazorpaySecretSet);
+  const razorpayLive = razorpayEnabled && Boolean(razorpayKeyId) && secretWillBeSet;
 
-    if (partialCODMode === "fixed") {
-      if (!Number.isFinite(fixedAmountRupees) || fixedAmountRupees <= 0) {
-        toast.error("Partial COD fixed amount must be greater than ₹0.");
-        return;
-      }
-    } else {
-      if (!Number.isInteger(percentage) || percentage < 1 || percentage > 99) {
-        toast.error("Partial COD percentage must be a whole number between 1% and 99%.");
-        return;
-      }
+  const handleSave = () => {
+    if (razorpayEnabled && (!razorpayKeyId || !secretWillBeSet)) {
+      toast.error("Razorpay needs both a Key ID and a Key Secret to go live.");
+      return;
+    }
+    if (!codEnabled && !razorpayEnabled) {
+      toast.error("Enable at least one payment method, or customers can't check out.");
+      return;
     }
 
-    updateStoreMutation.mutate(
+    updateMutation.mutate(
       {
-        enableCOD: false,
-        enablePartialCOD,
-        partialCODMode,
-        // Money is stored as integer paise on the backend, never Float.
-        partialCODFixedAmountPaise: Math.round(fixedAmountRupees * 100),
-        partialCODPercentage: percentage,
-        enableRazorpay,
-        enableWhatsApp,
-        whatsappNumber,
+        codEnabled,
+        razorpayEnabled,
         razorpayKeyId,
+        // Only send a secret the admin actually typed.
         ...(razorpayKeySecret ? { razorpayKeySecret } : {}),
       },
       {
         onSuccess: () => {
           setIsEditing(false);
           setRazorpayKeySecret("");
-          toast.success("Payment methods updated.");
         },
-        onError: () => toast.error("Failed to update payment methods."),
       },
     );
   };
+
+  const disabled = !isEditing;
 
   return (
     <Card>
@@ -127,7 +97,7 @@ export function PaymentsTab() {
         <div>
           <CardTitle>Payment Methods</CardTitle>
           <CardDescription>
-            Configure how your customers can pay for their orders.
+            How customers can pay. Whatever is on here is what checkout offers.
           </CardDescription>
         </div>
         <SettingsActions>
@@ -145,201 +115,133 @@ export function PaymentsTab() {
               <Button
                 variant="outline"
                 onClick={handleCancel}
+                disabled={updateMutation.isPending}
                 className="w-full md:w-auto"
               >
                 Cancel
               </Button>
               <Button
-                onClick={handleSavePayments}
-                disabled={updateStoreMutation.isPending}
+                onClick={handleSave}
+                disabled={updateMutation.isPending}
                 className="w-full md:w-auto"
               >
-                Save Configuration
+                {updateMutation.isPending ? "Saving…" : "Save Configuration"}
               </Button>
             </>
           )}
         </SettingsActions>
       </CardHeader>
+
       <CardContent className="space-y-6">
-        <div className="border rounded-lg overflow-hidden">
-          <div className="flex items-center justify-between p-4 bg-muted/30">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-md border bg-background">
-                  <Banknote className="h-4 w-4" />
-                </span>
-                <Label className="text-base">Partial Cash on Delivery</Label>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Customers pay a required amount online through Razorpay and pay
-                the remaining balance on delivery.
-              </p>
-            </div>
-            <Switch
-              checked={enablePartialCOD}
-              onCheckedChange={setEnablePartialCOD}
-              disabled={!isEditing}
-            />
+        {isLoading ? (
+          <div className="space-y-4">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-40 w-full" />
           </div>
+        ) : (
+          <>
+            {!codEnabled && !razorpayEnabled && (
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>
+                  No payment method is enabled — customers cannot complete an
+                  order.
+                </AlertDescription>
+              </Alert>
+            )}
 
-          {(enablePartialCOD || isEditing) && (
-            <div className="grid gap-4 border-t p-4 md:grid-cols-[220px_1fr]">
-              <div className="space-y-2">
-                <Label>Payment calculation</Label>
-                <Select
-                  value={partialCODMode}
-                  onValueChange={(value) =>
-                    setPartialCODMode(value as "fixed" | "percentage")
-                  }
-                  disabled={!isEditing}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select mode" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="fixed">Fixed Amount</SelectItem>
-                    <SelectItem value="percentage">Percentage</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>
-                  {partialCODMode === "fixed"
-                    ? "Online payment amount"
-                    : "Online payment percentage"}
-                </Label>
-                <div className="relative">
-                  {partialCODMode === "fixed" ? (
-                    <IndianRupee className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  ) : (
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                      %
+            {/* Cash on Delivery */}
+            <div className="border rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between gap-4 p-4 bg-muted/30">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-md border bg-background">
+                      <Banknote className="h-4 w-4" />
                     </span>
-                  )}
-                  <Input
-                    type="number"
-                    min={1}
-                    max={partialCODMode === "percentage" ? 99 : undefined}
-                    step={partialCODMode === "fixed" ? 1 : 1}
-                    value={
-                      partialCODMode === "fixed"
-                        ? partialCODFixedAmount
-                        : partialCODPercentage
-                    }
-                    onChange={(event) =>
-                      partialCODMode === "fixed"
-                        ? setPartialCODFixedAmount(event.target.value)
-                        : setPartialCODPercentage(event.target.value)
-                    }
-                    disabled={!isEditing}
-                    className={partialCODMode === "fixed" ? "pl-9" : "pr-9"}
-                  />
+                    <Label className="text-base">Cash on Delivery</Label>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    The customer pays the full amount when the order arrives.
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Default is ₹500. If a fixed amount is equal to or greater than
-                  the order total, checkout will ask the customer to use full
-                  online payment.
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="border rounded-lg overflow-hidden">
-          <div className="flex items-center justify-between p-4 bg-muted/30">
-            <div className="space-y-0.5">
-              <div className="flex items-center gap-2">
-                <Label className="text-base">Razorpay Verification</Label>
-                {storeSettings?.isRazorpayKeySecretSet && !enableRazorpay && (
-                  <div className="flex items-center gap-1 bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-xs font-medium">
-                    Keys Set
-                  </div>
-                )}
-                {storeSettings?.isRazorpayKeySecretSet && enableRazorpay && (
-                  <div className="flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-medium">
-                    <Check className="h-3 w-3" /> Live
-                  </div>
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Accept online payments via UPI, Cards, Netbanking using
-                Razorpay.
-              </p>
-            </div>
-            <Switch
-              checked={enableRazorpay}
-              onCheckedChange={setEnableRazorpay}
-              disabled={!isEditing}
-            />
-          </div>
-
-          <div
-            className={`p-4 space-y-4 border-t transition-all ${
-              enableRazorpay || isEditing ? "block" : "hidden"
-            }`}
-          >
-            <div className="space-y-2">
-              <Label>Key ID</Label>
-              <Input
-                placeholder="rzp_test_..."
-                value={razorpayKeyId}
-                onChange={(e) => setRazorpayKeyId(e.target.value)}
-                disabled={!isEditing}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Key Secret</Label>
-              <Input
-                type="password"
-                placeholder={
-                  storeSettings?.isRazorpayKeySecretSet
-                    ? "•••••••••• (Stored safely)"
-                    : "Enter new secret"
-                }
-                value={razorpayKeySecret}
-                onChange={(e) => setRazorpayKeySecret(e.target.value)}
-                disabled={!isEditing}
-              />
-              <p className="text-xs text-muted-foreground">
-                Leave blank to keep the current secret.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="border rounded-lg overflow-hidden">
-          <div className="flex items-center justify-between p-4 bg-muted/30">
-            <div className="space-y-0.5">
-              <Label className="text-base">WhatsApp Orders</Label>
-              <p className="text-sm text-muted-foreground">
-                Allow customers to place orders directly via WhatsApp message.
-              </p>
-            </div>
-            <Switch
-              checked={enableWhatsApp}
-              onCheckedChange={setEnableWhatsApp}
-              disabled={!isEditing}
-            />
-          </div>
-
-          {enableWhatsApp && (
-            <div className="p-4 border-t space-y-4">
-              <div className="space-y-2">
-                <Label>WhatsApp Number</Label>
-                <Input
-                  placeholder="+91..."
-                  value={whatsappNumber}
-                  onChange={(e) => setWhatsappNumber(e.target.value)}
-                  disabled={!isEditing}
+                <Switch
+                  checked={codEnabled}
+                  onCheckedChange={setCodEnabled}
+                  disabled={disabled}
                 />
-                <p className="text-xs text-muted-foreground">
-                  Include country code (e.g., +919876543210)
-                </p>
               </div>
             </div>
-          )}
-        </div>
+
+            {/* Razorpay */}
+            <div className="border rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between gap-4 p-4 bg-muted/30">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-md border bg-background">
+                      <CreditCard className="h-4 w-4" />
+                    </span>
+                    <Label className="text-base">Pay Online (Razorpay)</Label>
+                    {razorpayLive ? (
+                      <span className="flex items-center gap-1 bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-medium">
+                        <Check className="h-3 w-3" /> Live
+                      </span>
+                    ) : razorpayEnabled ? (
+                      <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-xs font-medium">
+                        Keys needed
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    UPI, cards and netbanking, collected upfront through
+                    Razorpay.
+                  </p>
+                </div>
+                <Switch
+                  checked={razorpayEnabled}
+                  onCheckedChange={setRazorpayEnabled}
+                  disabled={disabled}
+                />
+              </div>
+
+              {(razorpayEnabled || isEditing) && (
+                <div className="p-4 space-y-4 border-t">
+                  <div className="space-y-2">
+                    <Label>Key ID</Label>
+                    <Input
+                      placeholder="rzp_test_..."
+                      value={razorpayKeyId}
+                      onChange={(e) => setRazorpayKeyId(e.target.value)}
+                      disabled={disabled}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      The publishable half — it's sent to the customer's browser
+                      to open the payment window.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Key Secret</Label>
+                    <Input
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={
+                        settings?.isRazorpaySecretSet
+                          ? "•••••••••• (stored, encrypted)"
+                          : "Enter the key secret"
+                      }
+                      value={razorpayKeySecret}
+                      onChange={(e) => setRazorpayKeySecret(e.target.value)}
+                      disabled={disabled}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Stored encrypted and never shown again. Leave blank to
+                      keep the current one.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );

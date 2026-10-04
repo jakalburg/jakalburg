@@ -18,6 +18,7 @@ import {
 import { ContactService } from './contact.service';
 import { CreateContactDto, UpdateContactStatusDto } from './dto/contact.dto';
 import { AdminOnly } from '../auth/decorators/admin-only.decorator';
+import { PaginationQueryDto } from '../common/pagination';
 
 /**
  * ContactController — storefront submissions + the admin Contact inbox.
@@ -41,19 +42,25 @@ export class ContactController {
     return this.contactService.create(createContactDto);
   }
 
-  /** Admin: one inbox (submissions of a given `type`), newest-first. */
+  /** Admin: one inbox (submissions of a given `type`), newest-first, paginated. */
   @Get()
   @AdminOnly()
-  @ApiOperation({ summary: 'Admin: list submissions (optionally by type)' })
+  @ApiOperation({
+    summary: 'Admin: list submissions (paginated)',
+    description: 'Defaults to page 1 × 10; `limit` is capped at 100.',
+  })
   @ApiQuery({
     name: 'type',
     required: false,
     enum: ['contact_us', 'newsletter'],
     description: 'Filter to one inbox. Omit for everything.',
   })
-  @ApiOkResponse({ description: 'Submissions, newest-first.' })
-  findAll(@Query('type') type?: string) {
-    return this.contactService.findAll(type);
+  @ApiOkResponse({ description: 'Paged submissions, newest-first.' })
+  findAll(
+    @Query() pagination: PaginationQueryDto,
+    @Query('type') type?: string,
+  ) {
+    return this.contactService.findAll({ ...pagination, type });
   }
 
   /** Admin: a single submission. */

@@ -3,7 +3,6 @@
 import { usePathname } from "next/navigation";
 import { ProductsTab } from "@/components/catalog/products-tab";
 import { CategoriesTab } from "@/components/catalog/categories-tab";
-import { BrandsTab } from "@/components/catalog/brands-tab";
 import { CouponsTab } from "@/components/catalog/coupons-tab";
 import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
@@ -15,14 +14,12 @@ function CatalogContent() {
   const isProductsPage =
     pathname === "/catalog" || pathname.includes("/products");
   const isCategoriesPage = pathname.includes("/categories");
-  const isBrandsPage = pathname.includes("/brands");
   const isCouponsPage = pathname.includes("/coupons");
 
   // Default to products if on base /catalog path
   const showProducts =
-    isProductsPage && !isCategoriesPage && !isBrandsPage && !isCouponsPage;
+    isProductsPage && !isCategoriesPage && !isCouponsPage;
   const showCategories = isCategoriesPage;
-  const showBrands = isBrandsPage;
   const showCoupons = isCouponsPage;
 
   return (
@@ -37,7 +34,6 @@ function CatalogContent() {
       <div className="space-y-4">
         {showProducts && <ProductsTab />}
         {showCategories && <CategoriesTab />}
-        {showBrands && <BrandsTab />}
         {showCoupons && <CouponsTab />}
       </div>
     </div>
