@@ -48,7 +48,6 @@ import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { ShipOrderDialog } from "@/components/orders/ship-order-dialog";
 import { getTrackingUrl } from "@/lib/tracking-utils";
-import { CustomerDetailSheet } from "@/components/customers/customer-detail-sheet";
 import { OrderInvoiceDialog } from "@/components/orders/order-invoice-dialog";
 import { ResolveReturnPaymentCard } from "@/components/wallet/resolve-return-payment-card";
 import { useOrderFundingSources } from "@/hooks/use-wallet";
@@ -223,7 +222,6 @@ export default function OrderDetailsPage() {
   const [showConfirmAction, setShowConfirmAction] = useState(false);
   const [showRejectAction, setShowRejectAction] = useState(false);
   const [rejectionReason, setRejectionReason] = useState("");
-  const [customerSheetOpen, setCustomerSheetOpen] = useState(false);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [newStatus, setNewStatus] = useState("");
   const [notifyCustomer, setNotifyCustomer] = useState(false);
@@ -687,13 +685,17 @@ export default function OrderDetailsPage() {
             <CardContent className="space-y-4">
               <div>
                 <span className="text-sm text-muted-foreground">Name</span>
+                {/* Navigates to the full customer screen rather than opening
+                    the slide-over: from an order you usually want the whole
+                    history and the back button, not a peek. Guest orders have
+                    no user row, so they stay plain text. */}
                 {order.user?.id ? (
-                  <button
-                    onClick={() => setCustomerSheetOpen(true)}
+                  <Link
+                    href={`/customers/${order.user.id}`}
                     className="block font-medium text-primary hover:underline text-left"
                   >
                     {customerName}
-                  </button>
+                  </Link>
                 ) : (
                   <p className="font-medium">{customerName}</p>
                 )}
@@ -809,12 +811,6 @@ export default function OrderDetailsPage() {
           </Card>
         </div>
       </div>
-
-      <CustomerDetailSheet
-        customerId={order.user?.id || null}
-        open={customerSheetOpen}
-        onClose={() => setCustomerSheetOpen(false)}
-      />
 
       <OrderInvoiceDialog
         order={order}
