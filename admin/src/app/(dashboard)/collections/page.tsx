@@ -34,16 +34,22 @@ export default function CollectionsPage() {
 
   const [page, setPage] = useState(1);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isPlaceholderData, error } = useQuery({
     queryKey: ["collections", page],
     queryFn: () =>
       collectionsService(api).getAll({ page, limit: TABLE_PAGE_SIZE }),
+    // Holds the totals steady so the pagination control doesn't jump while the
+    // next page loads. The ROWS are not shown stale — see `isPageLoading`.
     placeholderData: (previous) => previous,
   });
 
   const collections = data?.data ?? [];
   const total = data?.total ?? 0;
   const totalPages = data?.totalPages ?? 1;
+
+  // `isPlaceholderData` means these rows still belong to the previous page, so
+  // the table shows its loading state until the real page lands.
+  const isPageLoading = isLoading || isPlaceholderData;
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => collectionsService(api).delete(id),
@@ -178,7 +184,7 @@ export default function CollectionsPage() {
         title="All Collections"
         data={collections}
         columns={columns}
-        isLoading={isLoading}
+        isLoading={isPageLoading}
         error={error}
         emptyMessage="No collections found"
         getRowKey={(collection) => collection.id}

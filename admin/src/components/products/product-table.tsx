@@ -68,6 +68,7 @@ import {
 import { cn } from "@/lib/utils";
 import { TablePagination } from "@/components/admin/table-pagination";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import useAxiosAuth from "@/hooks/use-axios-auth";
@@ -78,6 +79,12 @@ import {
 
 interface ProductTableProps {
   products: Product[];
+  /**
+   * True while the rows for a newly requested page are still in flight. The
+   * toolbar and pagination stay put — only the rows become placeholders, so the
+   * page number you clicked is never captioning the previous page's products.
+   */
+  isPageLoading?: boolean;
   currentPage?: number;
   totalPages?: number;
   total?: number;
@@ -115,6 +122,7 @@ const visibilityColors = {
 
 export function ProductTable({
   products,
+  isPageLoading = false,
   currentPage = 1,
   totalPages = 1,
   total = 0,
@@ -146,11 +154,13 @@ export function ProductTable({
 
   // Ensure products is an array
   const productsArray = Array.isArray(products) ? products : [];
+  // The filter matches Product.category, which stores the slug — so offer
+  // slugs, not display names. Categories are flat now (gender lives on the
+  // product), so there is no subcategory level to flatten.
   const categoryOptions = categories
-    .flatMap((category) => [category, ...(category.subCategories || [])])
-    .map((category) => category.productType || category.parent)
-    .filter((category): category is string => Boolean(category))
-    .filter((category, index, list) => list.indexOf(category) === index)
+    .map((category) => category.slug)
+    .filter((slug): slug is string => Boolean(slug))
+    .filter((slug, index, list) => list.indexOf(slug) === index)
     .sort((a, b) => a.localeCompare(b));
   const selectedCategoryLabel =
     categoryFilter === "all" ? "All categories" : categoryFilter;
@@ -509,7 +519,15 @@ export function ProductTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredProducts.length === 0 ? (
+            {isPageLoading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <TableRow key={`loading-${i}`}>
+                  <TableCell colSpan={9}>
+                    <Skeleton className="h-9 w-full" />
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : filteredProducts.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={9}
@@ -790,7 +808,11 @@ export function ProductTable({
 
       {/* Mobile Card View */}
       <div className="grid grid-cols-1 gap-4 md:hidden">
-        {filteredProducts.length === 0 ? (
+        {isPageLoading ? (
+          Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={`loading-${i}`} className="h-28 w-full rounded-lg" />
+          ))
+        ) : filteredProducts.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             No products found
           </div>

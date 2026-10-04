@@ -1,0 +1,34 @@
+// Singleton row of payment configuration — the admin's Settings → Payments
+// screen writes it; checkout reads which methods are live. One row only; the
+// service creates it on first read.
+//
+// DELIBERATELY SEPARATE from the `Settings` singleton: that model is read
+// PUBLICLY by the storefront ("keep credentials and keys off it"). This one is
+// admin-only and holds a credential — the same split EmailSettings makes.
+//
+// `razorpayKeySecret` is stored ENCRYPTED (AES-256-GCM, see
+// common/crypto.util.ts) and is NEVER returned by any endpoint. The admin only
+// learns whether a secret is set, via the derived `isRazorpaySecretSet` flag.
+//
+// The storefront gets a separate, narrow read (`GET /payments/methods`) that
+// exposes only which methods are enabled plus the PUBLISHABLE key id — which
+// Razorpay's browser checkout requires and is safe to share.
+model PaymentSettings {
+  id String @id @default(cuid())
+
+  // ---- Which methods checkout offers ----
+  // Both can be on (the customer picks), or just one. With both off, checkout
+  // has nothing to offer and the storefront says so rather than taking an
+  // order it can't collect on.
+  codEnabled      Boolean @default(true)
+  razorpayEnabled Boolean @default(false)
+
+  // ---- Razorpay credentials ----
+  // keyId is the publishable half and is handed to the browser; keySecret
+  // signs and verifies payments and never leaves the server.
+  razorpayKeyId     String?
+  razorpayKeySecret String? // AES-256-GCM ciphertext, never plaintext
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

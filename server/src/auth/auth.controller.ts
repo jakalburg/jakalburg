@@ -40,6 +40,7 @@ import {
   ChangePasswordDto,
 } from './dto/email-auth.dto';
 import { GoogleOneTapDto } from './dto/google-one-tap.dto';
+import { AllowDuringMaintenance } from '../maintenance/allow-during-maintenance.decorator';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -103,6 +104,10 @@ export class AuthController {
   // ─── Login ─────────────────────────────────────────────────────────────────
 
   /** Log in with email + password. */
+  // Open during maintenance: an admin must be able to sign in to turn
+  // maintenance OFF. A customer signing in here still gets 503 from every
+  // other route, so this grants no storefront access.
+  @AllowDuringMaintenance()
   @Post('login-password')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Log in with email + password' })
@@ -213,6 +218,10 @@ export class AuthController {
   // ─── Authenticated account management ──────────────────────────────────────
 
   /** Return the current authenticated user. */
+  // Open during maintenance: an admin must be able to sign in to turn
+  // maintenance OFF. A customer signing in here still gets 503 from every
+  // other route, so this grants no storefront access.
+  @AllowDuringMaintenance()
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('jwt')
@@ -227,6 +236,10 @@ export class AuthController {
   }
 
   /** Log out (stateless — client discards the token). */
+  // Open during maintenance: an admin must be able to sign in to turn
+  // maintenance OFF. A customer signing in here still gets 503 from every
+  // other route, so this grants no storefront access.
+  @AllowDuringMaintenance()
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('jwt')

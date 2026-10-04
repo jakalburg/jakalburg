@@ -103,6 +103,16 @@ class Environment {
     );
   }
 
+  /**
+   * Key for encrypting secrets at rest (currently the SMTP password stored on
+   * the EmailSettings singleton). Falls back to JWT_SECRET so an existing
+   * deployment works before this is set; prefer a dedicated value so rotating
+   * the JWT secret doesn't make stored secrets unreadable.
+   */
+  get ENCRYPTION_KEY(): string {
+    return process.env.ENCRYPTION_KEY || '';
+  }
+
   // ── SMTP (nodemailer) ─────────────────────────────────────────────────
   get SMTP_HOST(): string {
     return process.env.SMTP_HOST || 'smtp.gmail.com';

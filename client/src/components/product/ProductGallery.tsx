@@ -9,6 +9,11 @@ const THUMB_PX = 80; // thumbnail column width (matches grid-cols-[80px_1fr])
 const THUMB_H = (THUMB_PX * 5) / 4; // thumbnails are aspect-[4/5]
 const THUMB_GAP = 8; // gap-2
 
+// Double-tap zoom in the fullscreen viewer.
+const ZOOM_SCALE = 2.5;
+const DOUBLE_TAP_MS = 300; // max gap between the two taps
+const TAP_SLOP_PX = 12; // movement past this counts as a drag, not a tap
+
 export function ProductGallery({ images, alt }: { images: string[]; alt: string }) {
   // `active` is shared: mobile (swipe/dots) and desktop (thumbnail click) never
   // show at once, and the zoom overlay uses whichever image is current.
@@ -242,6 +247,8 @@ function DesktopGallery({
 
 // Fullscreen zoom overlay — a swipeable carousel opened from the mobile zoom
 // button. Swipe left/right to move between images; Escape / close button exits.
+// Double-tap (or double-click) toggles between the fitted view and a zoomed
+// one anchored on the tapped point; while zoomed, drag to pan.
 function Lightbox({
   images,
   startIndex,
@@ -256,11 +263,110 @@ function Lightbox({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(startIndex);
 
+  // Double-tap zoom. `pan` is the translation of the scaled image, in px, from
+  // its centred resting position. Only the current image is ever zoomed.
+  const imgRefs = useRef<(HTMLImageElement | null)[]>([]);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
+  const dragRef = useRef<{
+    x: number;
+    y: number;
+    panX: number;
+    panY: number;
+    moved: boolean;
+  } | null>(null);
+
   // Open on the image the user tapped (no animation).
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollLeft = startIndex * el.clientWidth;
   }, [startIndex]);
+
+  // Paging away (swipe, dots, arrows) drops back to the fitted view.
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    lastTapRef.current = null;
+  }, [index]);
+
+  // Keep the scaled image from being dragged off-screen: it may travel by half
+  // the overflow on each axis, and not at all on an axis that still fits.
+  const clampPan = (x: number, y: number, scale: number) => {
+    const img = imgRefs.current[index];
+    const box = img?.parentElement;
+    if (!img || !box) return { x: 0, y: 0 };
+    const maxX = Math.max(0, (img.offsetWidth * scale - box.clientWidth) / 2);
+    const maxY = Math.max(0, (img.offsetHeight * scale - box.clientHeight) / 2);
+    return {
+      x: Math.min(maxX, Math.max(-maxX, x)),
+      y: Math.min(maxY, Math.max(-maxY, y)),
+    };
+  };
+
+  // Zoom in around the tapped point so it stays put under the finger.
+  const zoomToPoint = (clientX: number, clientY: number) => {
+    const box = imgRefs.current[index]?.parentElement;
+    if (!box) return;
+    const rect = box.getBoundingClientRect();
+    const dx = clientX - (rect.left + rect.width / 2);
+    const dy = clientY - (rect.top + rect.height / 2);
+    setZoom(ZOOM_SCALE);
+    setPan(clampPan(-dx * (ZOOM_SCALE - 1), -dy * (ZOOM_SCALE - 1), ZOOM_SCALE));
+  };
+
+  const resetZoom = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (zoom === 1) return; // let the carousel handle the swipe
+    dragRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      panX: pan.x,
+      panY: pan.y,
+      moved: false,
+    };
+    setDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    if (Math.hypot(dx, dy) > TAP_SLOP_PX) drag.moved = true;
+    setPan(clampPan(drag.panX + dx, drag.panY + dy, zoom));
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    setDragging(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    if (drag?.moved) return; // panned, not tapped
+
+    const now = Date.now();
+    const last = lastTapRef.current;
+    const isDoubleTap =
+      last !== null &&
+      now - last.t < DOUBLE_TAP_MS &&
+      Math.hypot(e.clientX - last.x, e.clientY - last.y) < TAP_SLOP_PX;
+
+    if (isDoubleTap) {
+      lastTapRef.current = null;
+      if (zoom > 1) resetZoom();
+      else zoomToPoint(e.clientX, e.clientY);
+      return;
+    }
+    lastTapRef.current = { t: now, x: e.clientX, y: e.clientY };
+  };
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -330,18 +436,46 @@ function Lightbox({
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="flex h-full snap-x snap-mandatory overflow-x-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        className={cn(
+          "flex h-full snap-x snap-mandatory overflow-x-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+          // Double-tapping otherwise selects the element (blue highlight) and
+          // flashes the mobile tap-highlight colour on every tap.
+          "select-none [-webkit-tap-highlight-color:transparent]",
+          // `manipulation` drops the browser's own double-tap-to-zoom so it
+          // can't fight ours; when zoomed we take the gesture entirely, so a
+          // drag pans the image instead of paging to the next one.
+          zoom > 1 ? "touch-none" : "touch-manipulation",
+        )}
       >
         {images.map((src, i) => (
           <div
             key={i}
-            className="flex h-full w-full flex-none snap-start items-center justify-center p-4"
+            className="flex h-full w-full flex-none snap-start items-center justify-center overflow-hidden p-4"
           >
             <img
+              ref={(el) => {
+                imgRefs.current[i] = el;
+              }}
               src={src}
               alt={i === startIndex ? alt : ""}
               aria-hidden={i !== startIndex}
-              className="max-h-full max-w-full object-contain"
+              draggable={false}
+              className={cn(
+                "max-h-full max-w-full object-contain",
+                !dragging && "transition-transform duration-200",
+                i === index && zoom > 1 && "cursor-grab active:cursor-grabbing",
+              )}
+              style={
+                i === index && zoom > 1
+                  ? {
+                      transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
+                    }
+                  : undefined
+              }
             />
           </div>
         ))}

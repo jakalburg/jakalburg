@@ -1,5 +1,6 @@
 import { AxiosInstance } from "axios";
 import { realApi } from "@/lib/api/real-axios";
+import { Paginated, toPaginated } from "@/types/pagination";
 
 // ---------------------------------------------------------------------------
 // Contact service — wired to the real NestJS backend (like customers / orders /
@@ -27,10 +28,19 @@ export interface Contact {
 }
 
 export const contactService = (_api: AxiosInstance) => ({
-  /** One inbox: every submission of a given `type`, newest-first. */
-  async getAll(type: ContactType): Promise<Contact[]> {
-    const response = await realApi.get("/contact", { params: { type } });
-    return response.data as Contact[];
+  /**
+   * ONE page of an inbox (10 by default), newest-first. This table grows with
+   * every form submission, so the screen asks for the page it's showing rather
+   * than the whole history.
+   */
+  async getAll(
+    type: ContactType,
+    params?: { page?: number; limit?: number },
+  ): Promise<Paginated<Contact>> {
+    const response = await realApi.get("/contact", {
+      params: { type, page: params?.page, limit: params?.limit },
+    });
+    return toPaginated<Contact>(response.data, params?.limit);
   },
 
   /** Mark a submission read / unread. */

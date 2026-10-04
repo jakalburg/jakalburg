@@ -1,16 +1,21 @@
 import { Prisma } from '@prisma/client';
 
 /**
- * Default home-page configuration seeded on first run (or restored via the
- * admin's "Restore Defaults" button). Seeding is idempotent — existing rows are
- * never overwritten, only missing `type`s are added (see WebsiteService.seed).
+ * The canonical home-page section list, seeded on first run and re-synced by
+ * the admin's "Sync to site" button (see WebsiteService.seedDefaults).
  *
- * Only HeroSlider is wired end-to-end to the storefront today; the other
- * sections are seeded so the admin's Home Setup tab isn't empty and each
- * section's config modal has a row to edit. Most ship disabled by default.
+ * These types ARE the storefront's home page: `client/src/pages/index.tsx`
+ * renders one block per enabled row, in `order`, and takes each block's
+ * eyebrow/heading from the row. A type listed here with no renderer on the
+ * client would be a section the admin can toggle to no effect — so the two
+ * lists must be kept in step.
+ *
+ * This replaced an inherited kaybykhushie list (AnimatedBanner, GiftWrapping,
+ * Reviews, KnowOurFounder, …) whose sections Jakalburg's storefront never had.
+ * `seedDefaults` prunes any row whose type is no longer here.
  */
 
-// Unsplash placeholders mirror the storefront's src/data/images.ts so the hero
+// Unsplash placeholders mirror the storefront's src/data/images.ts so the page
 // renders out of the box; the admin swaps these for brand assets.
 const img = (id: string, w = 1800) =>
   `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=${w}&q=80`;
@@ -48,7 +53,39 @@ const DEFAULT_HERO_SLIDES = [
   },
 ];
 
+/**
+ * The editorial band's defaults are the copy that was hardcoded in index.tsx
+ * before this section became editable — so seeding changes nothing visible.
+ */
+const DEFAULT_ESSENTIALS_FEATURE = {
+  image: img('1441984904996-e0b6ba687e04', 1600),
+  body: 'Tees, tanks, polos, shirts and knits — cut from long-staple cottons and fine merino, in a small, considered palette.',
+  buttonLabel: 'Shop essentials',
+  buttonLink: '/essentials',
+};
+
+/**
+ * The thin bar above the header. Its default copy is what was hardcoded in
+ * `client/src/components/layout/AnnouncementBar.tsx` before this row existed,
+ * so seeding changes nothing visible.
+ */
+const DEFAULT_ANNOUNCEMENT_BAR = {
+  text: 'Complimentary shipping on orders over ₹2,499 · Easy 30-day returns',
+  linkHref: '',
+};
+
 export const DEFAULT_HOME_SECTIONS: Prisma.HomeSectionCreateInput[] = [
+  // Not a home-page block, and like Footer it renders site-wide from
+  // SiteLayout. `order: 0` keeps it sorting above the hero without renumbering
+  // the rows below — syncToCanonical only renumbers when a type is REMOVED, so
+  // reusing order 1 here would tie with HeroSlider and sort arbitrarily.
+  {
+    type: 'AnnouncementBar',
+    title: 'Announcement Bar',
+    enabled: true,
+    order: 0,
+    data: DEFAULT_ANNOUNCEMENT_BAR,
+  },
   {
     type: 'HeroSlider',
     title: 'Hero Slider',
@@ -60,41 +97,45 @@ export const DEFAULT_HOME_SECTIONS: Prisma.HomeSectionCreateInput[] = [
     data: DEFAULT_HERO_SLIDES,
   },
   {
-    type: 'ShopByCategory',
-    title: 'Shop By Collection',
-    enabled: false,
+    type: 'JustArrived',
+    eyebrow: 'New arrivals',
+    title: 'Just arrived',
+    enabled: true,
     order: 2,
-    data: [],
+    data: Prisma.JsonNull,
   },
   {
-    type: 'AnimatedBanner',
-    title: 'Animated Banner',
-    enabled: false,
+    type: 'ShopByMood',
+    eyebrow: 'Collections',
+    title: 'Shop by mood',
+    enabled: true,
     order: 3,
-    data: [],
+    data: Prisma.JsonNull,
   },
-  { type: 'AGirlInKay', title: 'Trends', enabled: false, order: 4, data: [] },
   {
-    type: 'GiftWrapping',
-    title: 'Gift Wrapping',
-    enabled: false,
+    type: 'EssentialsFeature',
+    eyebrow: 'The Essentials',
+    title: "Foundational pieces you'll reach for daily.",
+    enabled: true,
+    order: 4,
+    data: DEFAULT_ESSENTIALS_FEATURE,
+  },
+  {
+    type: 'EverydayEdit',
+    eyebrow: 'Essentials',
+    title: 'The everyday edit',
+    enabled: true,
     order: 5,
-    data: {},
+    data: Prisma.JsonNull,
   },
-  {
-    type: 'CategoryStories',
-    title: 'Category Stories',
-    enabled: false,
-    order: 6,
-    data: [],
-  },
-  { type: 'Reviews', title: 'Reviews', enabled: false, order: 7, data: [] },
-  {
-    type: 'KnowOurFounder',
-    title: 'Know Our Founder',
-    enabled: false,
-    order: 8,
-    data: {},
-  },
-  { type: 'Footer', title: 'Footer', enabled: true, order: 9, data: {} },
+  // Not a home-page block: the Footer row carries the site-wide footer
+  // background images, which `client/src/components/layout/Footer.tsx` reads.
+  // It lives here because the footer background is configured alongside the
+  // home sections in the admin.
+  { type: 'Footer', title: 'Footer', enabled: true, order: 6, data: {} },
 ];
+
+/** The types above, for the prune step in `seedDefaults`. */
+export const DEFAULT_HOME_SECTION_TYPES: string[] = DEFAULT_HOME_SECTIONS.map(
+  (section) => section.type,
+);

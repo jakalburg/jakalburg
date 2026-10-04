@@ -87,7 +87,7 @@ export function ReviewsTab() {
 
   const debouncedSearch = useDebounce(search, 300);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, isPlaceholderData, error } = useQuery({
     queryKey: ["reviews", filter, debouncedSearch, page],
     queryFn: () =>
       reviewService(api).getAll({
@@ -96,14 +96,18 @@ export function ReviewsTab() {
         page,
         limit: TABLE_PAGE_SIZE,
       }),
-    // Keep the previous page on screen while the next one loads, so paging
-    // doesn't flash the table's skeleton on every click.
+    // Holds the totals steady so the pagination control doesn't jump while the
+    // next page loads. The ROWS are not shown stale — see `isPageLoading`.
     placeholderData: (previous) => previous,
   });
 
   const reviews = data?.data ?? [];
   const total = data?.total ?? 0;
   const totalPages = data?.totalPages ?? 1;
+
+  // `isPlaceholderData` means these rows still belong to the previous page or
+  // filter, so the table shows its loading state until the real page lands.
+  const isPageLoading = isLoading || isPlaceholderData;
 
   // A changed status filter or search term invalidates the current page.
   useEffect(() => {
@@ -376,7 +380,7 @@ export function ReviewsTab() {
           title="Customer Reviews"
           data={reviews}
           columns={columns}
-          isLoading={isLoading}
+          isLoading={isPageLoading}
           error={error}
           emptyMessage={
             debouncedSearch.trim()

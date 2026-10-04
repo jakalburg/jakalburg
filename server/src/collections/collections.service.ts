@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { Collection, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
+import { CACHE_NS, CACHE_TTL, cacheKeyFor } from '../redis/cache-keys';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { UpdateCollectionDto } from './dto/update-collection.dto';
 import { CollectionResponseDto } from './dto/collection-response.dto';
@@ -104,7 +106,10 @@ const SEED_COLLECTIONS: Array<
  */
 @Injectable()
 export class CollectionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   /**
    * One page of collections, ordered, each with a live product count.
@@ -113,23 +118,45 @@ export class CollectionsService {
    * pagination and gets the bounded `NAV_PAGE_SIZE` default; the admin table
    * passes page/limit and gets 10 at a time. Either way the query is capped —
    * `withCount` runs one count per row, and that fan-out has to stay small.
+   *
+   * Cached precisely BECAUSE of that fan-out: the nav read costs one count
+   * query per collection on every storefront render.
    */
   async findAll(
     query: PaginationQuery = {},
   ): Promise<PaginatedResult<CollectionResponseDto>> {
     const params = parsePagination(query, NAV_PAGE_SIZE);
 
-    const [total, collections] = await this.prisma.$transaction([
-      this.prisma.collection.count(),
-      this.prisma.collection.findMany({
-        orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
-        skip: params.skip,
-        take: params.take,
+    return this.redis.getOrSet(
+      cacheKeyFor(CACHE_NS.collections, {
+        page: params.skip,
+        size: params.take,
       }),
-    ]);
+      CACHE_TTL.collections,
+      async () => {
+        const [total, collections] = await this.prisma.$transaction([
+          this.prisma.collection.count(),
+          this.prisma.collection.findMany({
+            orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+            skip: params.skip,
+            take: params.take,
+          }),
+        ]);
 
-    const data = await Promise.all(collections.map((c) => this.withCount(c)));
-    return paginate(data, total, params);
+        const data = await Promise.all(
+          collections.map((c) => this.withCount(c)),
+        );
+        return paginate(data, total, params);
+      },
+    );
+  }
+
+  /**
+   * Drop every cached collection page. Product writes also change the counts
+   * rendered here, so ProductsService invalidates this namespace too.
+   */
+  private invalidate(): Promise<void> {
+    return this.redis.invalidate(`${CACHE_NS.collections}*`);
   }
 
   async findById(id: string): Promise<CollectionResponseDto> {
@@ -154,6 +181,7 @@ export class CollectionsService {
           order: dto.order ?? (await this.nextOrder()),
         },
       });
+      await this.invalidate();
       return this.withCount(created);
     } catch (e) {
       throw this.rethrowDuplicate(e, title);
@@ -185,6 +213,7 @@ export class CollectionsService {
 
     try {
       const updated = await this.prisma.collection.update({ where: { id }, data });
+      await this.invalidate();
       return this.withCount(updated);
     } catch (e) {
       throw this.rethrowDuplicate(e, dto.title ?? existing.title);
@@ -203,6 +232,7 @@ export class CollectionsService {
       UPDATE "Product"
       SET "collections" = array_remove("collections", ${existing.slug})
       WHERE ${existing.slug} = ANY("collections")`;
+    await this.invalidate();
     return { success: true, id };
   }
 
@@ -229,6 +259,7 @@ export class CollectionsService {
       WHERE "collection" IS NOT NULL
         AND "collection" <> ''
         AND cardinality("collections") = 0`;
+    if (created.length) await this.invalidate();
     return { created: created.length, slugs: created };
   }
 

@@ -1,33 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PagesTable } from "@/components/pages/pages-table";
-import { usePages } from "@/hooks/use-pages";
-import { TableSkeleton } from "@/components/admin/table-skeleton";
-import { Card, CardContent } from "@/components/ui/card";
-import { useQueryClient, useMutation } from "@tanstack/react-query";
-import useAxiosAuth from "@/hooks/use-axios-auth";
-import { pagesService } from "@/services/pages.service";
-import { toast } from "sonner";
-import { RefreshCw } from "lucide-react";
+import { useSeedPages } from "@/hooks/use-pages";
 
 export function PagesTab() {
-  const { data: pages = [], isLoading } = usePages();
-  const api = useAxiosAuth();
-  const queryClient = useQueryClient();
-
-  const seedMutation = useMutation({
-    mutationFn: () => pagesService(api).seed(),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["pages"] });
-      toast.success(data?.message || "Default pages seeded!");
-    },
-    onError: () => {
-      toast.error("Failed to seed default pages");
-    },
-  });
+  // The table owns its own paged query (and its loading state) — it has the
+  // search and page state the request is built from.
+  const seedMutation = useSeedPages();
 
   return (
     <div className="space-y-6 pt-4">
@@ -40,7 +22,18 @@ export function PagesTab() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-        
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => seedMutation.mutate()}
+            disabled={seedMutation.isPending}
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${seedMutation.isPending ? "animate-spin" : ""}`}
+            />
+            Seed defaults
+          </Button>
           <Button asChild className="gap-2" size="sm">
             <Link href="/pages/add">
               <Plus className="w-4 h-4" />
@@ -52,15 +45,7 @@ export function PagesTab() {
 
       {/* Pages Table */}
       <div>
-        {isLoading ? (
-          <Card>
-            <CardContent className="pt-6">
-              <TableSkeleton rows={5} columns={5} />
-            </CardContent>
-          </Card>
-        ) : (
-          <PagesTable pages={pages} />
-        )}
+        <PagesTable />
       </div>
     </div>
   );

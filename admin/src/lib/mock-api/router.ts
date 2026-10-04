@@ -3,7 +3,7 @@
 //
 // `resolveMock(method, url, ctx)` maps an HTTP method + endpoint path to the
 // exact payload shape the corresponding service/hook expects (bare arrays,
-// `{ data, total, skip, take, hasMore }` envelopes for products/logs, and
+// `{ data, total, skip, take, hasMore }` envelopes for products, and
 // `{ items, ... }` for orders). Writes echo a plausible result so mutations,
 // optimistic updates and toasts behave like the real API.
 // ---------------------------------------------------------------------------
@@ -46,20 +46,6 @@ const paginate = (all: any[], skip = 0, take = 10) => ({
   take,
   hasMore: skip + take < all.length,
 });
-
-function csvBlob(rows: any[]): any {
-  const headers = ["id", "message", "errorType", "severity", "status", "createdAt"];
-  const lines = [headers.join(",")];
-  for (const r of rows) {
-    lines.push(headers.map((h) => JSON.stringify(r[h] ?? "")).join(","));
-  }
-  const csv = lines.join("\n");
-  try {
-    return new Blob([csv], { type: "text/csv" });
-  } catch {
-    return csv;
-  }
-}
 
 export function resolveMock(method: Method, rawUrl: string, ctx: MockContext = {}): any {
   const { path, query } = parseUrl(rawUrl);
@@ -123,9 +109,6 @@ export function resolveMock(method: Method, rawUrl: string, ctx: MockContext = {
     if (path === "/categories") return db.mockCategories;
     if (seg[0] === "categories" && seg[1]) return db.mockCategories.find((c) => c.id === seg[1]) || db.mockCategories[0];
 
-    // Brands
-    if (path === "/brands") return db.mockBrands;
-    if (seg[0] === "brands" && seg[1]) return db.mockBrands.find((b) => b.id === seg[1]) || db.mockBrands[0];
 
     // Collections
     if (path === "/collections") return db.mockCollections;
@@ -143,23 +126,6 @@ export function resolveMock(method: Method, rawUrl: string, ctx: MockContext = {
     // Reviews are served by the real backend now (see review.service.ts →
     // realApi). `db.mockReviews` stays put because the home-page builder still
     // seeds its testimonial section from it.
-
-    // Logs
-    if (path === "/logs") {
-      const skip = Number(params.skip ?? 0);
-      const take = Number(params.take ?? 20);
-      let list = [...db.mockLogs];
-      if (params.severity) list = list.filter((l) => l.severity === params.severity);
-      if (params.status) list = list.filter((l) => l.status === params.status);
-      if (params.source) list = list.filter((l) => l.source === params.source);
-      if (params.search) {
-        const q = String(params.search).toLowerCase();
-        list = list.filter((l) => l.message.toLowerCase().includes(q));
-      }
-      return paginate(list, skip, take);
-    }
-    if (path === "/logs/export") return csvBlob(db.mockLogs);
-    if (seg[0] === "logs" && seg[1]) return db.mockLogs.find((l) => l.id === seg[1]) || db.mockLogs[0];
 
     // Pages
     if (path === "/pages") return db.mockPages;
@@ -250,9 +216,6 @@ export function resolveMock(method: Method, rawUrl: string, ctx: MockContext = {
     if (path === "/settings/storage/verify") return { success: true, message: "Storage connection OK" };
     if (path === "/settings/redis/verify") return { success: true, message: "Redis connection OK" };
     if (path === "/settings/verify-smtp") return { success: true, message: "SMTP connection OK" };
-
-    // Logs clear
-    if (path === "/logs/clear") return { success: true, deleted: (body.ids?.length ?? db.mockLogs.length) };
 
     // Website home-sections seed
     if (path === "/website/home-sections/seed") return { success: true, seeded: db.mockHomeSections.length };

@@ -25,6 +25,8 @@ import {
 import { ImageShimmer } from "@/components/ui/image-shimmer";
 import { couponsService } from "@/services";
 import useAxiosAuth from "@/hooks/use-axios-auth";
+import { TablePagination } from "@/components/admin/table-pagination";
+import { useClientPagination } from "@/hooks/use-client-pagination";
 
 const formatDate = (dateString?: string | null) => {
   if (!dateString) return "—";
@@ -49,6 +51,13 @@ export default function CouponDetailPage() {
     queryKey: ["coupon-usage", couponId],
     queryFn: () => couponsService(axiosAuth).getUsage(couponId),
   });
+
+  // Declared above the early returns below, since hooks can't run
+  // conditionally. A popular coupon's redemption history is unbounded, so this
+  // table needs paging even though the rest of the page is a fixed summary.
+  const usage = usageData?.usage ?? [];
+  const { pageRows, page, totalPages, total, setPage } =
+    useClientPagination(usage);
 
   if (couponLoading) {
     return (
@@ -80,7 +89,6 @@ export default function CouponDetailPage() {
     coupon.discountType === "percentage"
       ? `${coupon.discountAmount}%`
       : `₹${coupon.discountAmount}`;
-  const usage = usageData?.usage ?? [];
 
   return (
     <div className="space-y-6">
@@ -184,7 +192,7 @@ export default function CouponDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {usage.map((row) => (
+                {pageRows.map((row) => (
                   <TableRow key={row.orderId}>
                     <TableCell>
                       {row.user ? (
@@ -215,6 +223,13 @@ export default function CouponDetailPage() {
               </TableBody>
             </Table>
           )}
+          <TablePagination
+            currentPage={page}
+            totalPages={totalPages}
+            total={total}
+            onPageChange={setPage}
+            itemLabel="redemptions"
+          />
         </CardContent>
       </Card>
     </div>

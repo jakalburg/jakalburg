@@ -22,7 +22,7 @@ import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
 import { Loader2 } from "lucide-react";
 import { useDebounce } from "@/hooks/use-debounce";
 import { ProductSortOption } from "@/services/products.service";
-import { useCategories } from "@/hooks/use-categories";
+import { useCategoryOptions } from "@/hooks/use-categories";
 
 const PAGE_SIZE = 10;
 
@@ -70,7 +70,7 @@ function ProductsPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryString, pathname]);
 
-  const { data, isLoading } = useProducts({
+  const { data, isLoading, isPlaceholderData } = useProducts({
     page,
     limit: PAGE_SIZE,
     search: debouncedSearchQuery,
@@ -78,7 +78,7 @@ function ProductsPageContent() {
     category: categoryFilter === "all" ? undefined : categoryFilter,
     status: showDisabled ? "all" : "active",
   });
-  const { data: categories = [] } = useCategories();
+  const { data: categories = [] } = useCategoryOptions();
   const { data: settings } = useSettings();
   const updateSettings = useUpdateSettings();
   const { data: disabledCount = 0 } = useDisabledProductsCount();
@@ -167,6 +167,10 @@ function ProductsPageContent() {
         ) : (
           <ProductTable
             products={products}
+            // `isPlaceholderData` = these rows still belong to the previous
+            // page. The table keeps its toolbar and pagination and shows
+            // placeholder rows until the page you asked for arrives.
+            isPageLoading={isPlaceholderData}
             currentPage={page}
             totalPages={totalPages}
             total={total}

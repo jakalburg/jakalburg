@@ -20,6 +20,14 @@ const API_ENDPOINTS = {
     getById: (id: string) => `/admin/staff/${id}`, // Assuming this exists or using simple get
   },
 
+  // ==================== DASHBOARD (real backend) ====================
+  // Live aggregates for the admin home screen. Recent orders come from the
+  // orders endpoints below, not from here.
+  dashboard: {
+    stats: "/dashboard/stats",
+    sales: "/dashboard/sales", // ?period=week|month|year
+  },
+
   // ==================== PRODUCTS ====================
   products: {
     getAll: "/products/admin/list",
@@ -33,7 +41,10 @@ const API_ENDPOINTS = {
     delete: (id: string) => `/products/${id}`,
     getRelated: (id: string) => `/products/related/${id}`,
     search: "/products/admin/search",
-    categories: "/products/meta/categories", // distinct category slugs
+    // Distinct category slugs actually in use. The product form's combobox no
+    // longer reads this — it uses categories.picker, which also includes
+    // managed categories that have no products yet.
+    categories: "/products/meta/categories",
     uploadMedia: (id: string) => `/products/${id}/media`,
     deleteMedia: (id: string, mediaId: string) =>
       `/products/${id}/media/${mediaId}`,
@@ -54,20 +65,17 @@ const API_ENDPOINTS = {
   },
 
   // ==================== CATEGORIES ====================
+  // Product categories — REAL backend. `adminList` includes inactive rows and
+  // product counts and seeds from the catalogue on first read; `picker` is the
+  // merged slug list the product form's category combobox offers.
   categories: {
-    getAll: "/category/show",
-    create: "/category/add",
-    update: (id: string) => `/category/${id}`, // Assuming update endpoint exists
-    delete: (id: string) => `/category/${id}`, // Assuming delete endpoint exists
-  },
-
-  // ==================== BRANDS ====================
-  brands: {
-    all: "/brands",
-    create: "/brands",
-    byId: (id: string) => `/brands/${id}`,
-    update: (id: string) => `/brands/${id}`,
-    delete: (id: string) => `/brands/${id}`,
+    adminList: "/categories/admin/list",
+    picker: "/categories/picker",
+    create: "/categories",
+    byId: (id: string) => `/categories/${id}`,
+    update: (id: string) => `/categories/${id}`,
+    delete: (id: string) => `/categories/${id}`,
+    seed: "/categories/seed",
   },
 
   // ==================== COUPONS (real backend) ====================
@@ -109,27 +117,81 @@ const API_ENDPOINTS = {
   },
 
   // ==================== NOTIFICATIONS ====================
+  // The admin header bell + Settings → Notifications — REAL backend, admin-only.
+  // `settings` takes no user id: the preferences are a store-wide singleton,
+  // not per-account (see the Notification Prisma model for why).
   notifications: {
     all: "/notifications",
     markRead: (id: string) => `/notifications/${id}/read`,
     markAllRead: "/notifications/read-all",
-    settings: (userId: string) => `/settings/notifications/${userId}`, // Base URL is settings, but we can organize it here or under settings
+    settings: "/settings/notifications",
+  },
+
+  // ==================== PAYMENTS ====================
+  // Payment configuration — REAL backend. `methods` is the public read the
+  // storefront uses; `settings` is admin-only and never returns the Razorpay
+  // key secret (only an `isRazorpaySecretSet` flag).
+  payments: {
+    methods: "/payments/methods",
+    settings: "/payments/settings",
   },
 
   // ==================== SETTINGS ====================
+  // Global store identity (brand marks, name, contact details, socials, SEO) —
+  // REAL backend. `get` is public (the storefront reads it too); `update` is
+  // admin-only. The rest are kaybykhushie leftovers with no backend here.
   settings: {
-    notifications: (userId: string) => `/settings/notifications/${userId}`,
-    clearCache: "/settings/clear-cache",
-    verifyStorage: "/settings/storage/verify",
-    verifyRedis: "/settings/redis/verify",
+    get: "/settings",
+    update: "/settings",
+    notifications: "/settings/notifications",
+    // Email / SMTP — REAL backend, admin-only (it holds a credential, so
+    // unlike the public store settings it is never exposed to the storefront).
+    // The stored password is never returned; reads carry isSmtpConfigured.
+    email: {
+      get: "/settings/email",
+      update: "/settings/email",
+      verify: "/settings/email/verify",
+    },
+    // Media storage (Cloudinary / Cloudflare R2) + the Redis cache — REAL
+    // backend, admin-only, same reason: three credentials live here. None is
+    // ever returned; reads carry isCloudinaryConfigured / isR2Configured /
+    // isRedisConfigured. `update` writes BOTH the storage and the Redis
+    // fields — they share one settings row.
+    storage: {
+      get: "/settings/storage",
+      update: "/settings/storage",
+      verify: "/settings/storage/verify",
+      usage: "/settings/storage/usage",
+    },
+    // Maintenance mode — REAL backend, admin-only. These routes stay reachable
+    // while maintenance is ON (MaintenanceGuard lets every @AdminOnly route
+    // through), which is what makes it possible to switch back off.
+    maintenance: {
+      get: "/settings/maintenance",
+      update: "/settings/maintenance",
+      previewToken: "/settings/maintenance/preview-token",
+      revokeToken: "/settings/maintenance/preview-token/revoke",
+    },
+    // Operational cache routes. Each one spends Upstash commands against a
+    // 10,000/day free-tier budget, so these are fetched on demand — never on
+    // an interval.
+    redis: {
+      stats: "/settings/redis/stats",
+      keys: "/settings/redis/keys",
+      verify: "/settings/redis/verify",
+      flush: "/settings/redis/flush",
+    },
   },
 
   // ==================== PAGES ====================
+  // Storefront static pages (Shipping, Returns, Privacy, Terms, FAQ) — REAL
+  // backend. `getAll` is the admin list (includes inactive drafts); the bare
+  // "/pages" and "/pages/slug/:slug" reads are public and used by the client.
   pages: {
-    getAll: "/pages",
+    getAll: "/pages/all",
     create: "/pages",
-    getById: (id: string) => `/pages/${id}`, // Admin uses ID
-    getBySlug: (slug: string) => `/pages/${slug}`, // Public uses slug (if needed in admin)
+    getById: (id: string) => `/pages/${id}`,
+    getBySlug: (slug: string) => `/pages/slug/${slug}`,
     update: (id: string) => `/pages/${id}`,
     delete: (id: string) => `/pages/${id}`,
     seed: "/pages/seed",
@@ -142,6 +204,10 @@ const API_ENDPOINTS = {
       update: (id: string) => `/website/home-sections/${id}`,
       seed: "/website/home-sections/seed",
     },
+    // About page singleton — GET public, PATCH admin-only.
+    about: "/website/about",
+    // Contact page singleton — GET public, PATCH admin-only.
+    contact: "/website/contact",
   },
 
   // ==================== CONTACT INBOX (real backend) ====================
@@ -151,16 +217,6 @@ const API_ENDPOINTS = {
     getAll: "/contact",
     updateStatus: (id: string) => `/contact/${id}/status`,
     delete: (id: string) => `/contact/${id}`,
-  },
-
-  // ==================== SYSTEM LOGS ====================
-  logs: {
-    getAll: "/logs",
-    getById: (id: string) => `/logs/${id}`,
-    updateStatus: (id: string) => `/logs/${id}/status`,
-    delete: (id: string) => `/logs/${id}`,
-    clear: "/logs/clear",
-    export: "/logs/export",
   },
 };
 

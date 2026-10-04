@@ -12,6 +12,7 @@ import {
   useContactPage,
   type ContactPageContent,
 } from "@/hooks/useContactPage";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
 
 // Basic "looks like an email" check — validate in the UI before we hit the API.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -36,15 +37,21 @@ export default function ContactPage({
   initialContact: ContactPageContent | null;
 }) {
   const { data: contact } = useContactPage(initialContact ?? undefined);
-  // Admin-edited details, with fallbacks so the page never looks empty.
+  const settings = useSiteSettings();
+
+  // Page copy comes from Website → Contact Page; fallbacks so it never looks empty.
   const heading = contact?.title?.trim() || "We're here to help.";
   const intro =
     contact?.formDescription?.trim() ||
     "Questions about a piece, an order, or fit? Our care team responds within one business day.";
-  const email = contact?.email?.trim();
-  const phone = contact?.phone?.trim();
-  const address = contact?.address?.trim();
-  const mapLink = contact?.mapLink?.trim();
+
+  // The details themselves are global and live in Settings → Store. Values
+  // still on the older WebsiteContact row are honoured as a fallback so a store
+  // that hasn't been migrated yet keeps rendering them.
+  const email = settings.email ?? contact?.email?.trim();
+  const phone = settings.phone ?? contact?.phone?.trim();
+  const address = settings.address ?? contact?.address?.trim();
+  const mapLink = settings.mapLink ?? contact?.mapLink?.trim();
 
   const [form, setForm] = useState({ name: "", email: "", message: "" });
   const [submitting, setSubmitting] = useState(false);

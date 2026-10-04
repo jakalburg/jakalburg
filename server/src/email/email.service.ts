@@ -3,6 +3,7 @@ import * as nodemailer from 'nodemailer';
 import * as ejs from 'ejs';
 import * as path from 'path';
 import { env } from '../config/env';
+import { EmailSettingsService } from './email-settings.service';
 
 /** One ordered line, shaped for the order email templates. */
 export interface OrderEmailItem {
@@ -44,6 +45,8 @@ export interface OrderEmailData {
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
+
+  constructor(private readonly emailSettings: EmailSettingsService) {}
 
   /**
    * Resolve the storefront base URL for building links in emails. `env.FRONTEND_URL`
@@ -100,14 +103,21 @@ export class EmailService {
     }));
   }
 
-  private getTransporter() {
+  /**
+   * Build the transport from the admin-editable EmailSettings singleton, which
+   * falls back per field to the SMTP_* env vars. Async because that read hits
+   * the database (cached in EmailSettingsService, invalidated on save), so
+   * changing SMTP in the admin takes effect on the next send — no redeploy.
+   */
+  private async getTransporter() {
+    const config = await this.emailSettings.resolve();
     return nodemailer.createTransport({
-      host: env.SMTP_HOST,
-      port: env.SMTP_PORT,
-      secure: env.SMTP_SECURE,
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
       auth: {
-        user: env.SMTP_USER,
-        pass: env.SMTP_PASSWORD,
+        user: config.user,
+        pass: config.password,
       },
     });
   }
@@ -135,14 +145,15 @@ export class EmailService {
       const templatePath = path.join(__dirname, 'templates', templateName);
       const html = await ejs.renderFile(templatePath, templateData);
 
+      const config = await this.emailSettings.resolve();
       const mailOptions = {
-        from: `"${env.SMTP_FROM_NAME}" <${env.SMTP_FROM_EMAIL}>`,
+        from: `"${config.fromName}" <${config.fromEmail}>`,
         to,
         subject,
         html,
       };
 
-      const transporter = this.getTransporter();
+      const transporter = await this.getTransporter();
       await transporter.sendMail(mailOptions);
       this.logger.log(`Email '${subject}' sent successfully to ${to}`);
       return true;
@@ -244,13 +255,18 @@ export class EmailService {
     );
   }
 
-  /** New-order notification to the store owner (OWNER_EMAIL), sent on checkout. */
+  /**
+   * New-order notification to the store owner. The recipient comes from the
+   * admin's Settings → Email screen (falling back to OWNER_EMAIL), so a
+   * bouncing address can be fixed without a redeploy.
+   */
   async sendOrderPlacedOwnerEmail(order: OrderEmailData): Promise<boolean> {
     const adminOrderUrl = `${this.getAdminBaseUrl()}/orders/${encodeURIComponent(
       order.orderId,
     )}`;
+    const { ownerEmail } = await this.emailSettings.resolve();
     return this.sendTemplateEmail(
-      env.OWNER_EMAIL,
+      ownerEmail,
       `New order · ${order.orderNumber} — ${env.STORE_NAME}`,
       'order-placed-admin.ejs',
       {
@@ -316,7 +332,8 @@ export class EmailService {
 
   async verifyConnection(): Promise<boolean> {
     try {
-      await this.getTransporter().verify();
+      const transporter = await this.getTransporter();
+      await transporter.verify();
       this.logger.log('SMTP connection verified successfully.');
       return true;
     } catch (error) {

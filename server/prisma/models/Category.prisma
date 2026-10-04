@@ -1,0 +1,43 @@
+// Product categories, managed from the admin's Catalog → Categories screen.
+//
+// IMPORTANT: this table does NOT own the relationship to products. A product
+// stores its category as a plain string (`Product.category`), and that stays
+// the source of truth for what a product actually is. This model is the
+// *editorial* layer on top: display name, artwork, which genders it belongs
+// to, and whether it should be offered at all.
+//
+// Keeping it decoupled is deliberate. The catalogue predates this table, the
+// product form still lets an admin type a category that has no row here yet,
+// and the storefront must keep working if this table is empty. A foreign key
+// would make all three of those failure modes instead of normal states.
+model Category {
+  id String @id @default(cuid())
+
+  /// Display name, e.g. "Co-ord sets".
+  name String
+  /// The value stored on Product.category, e.g. "co-ord-sets". This is the
+  /// join to products, by value rather than by key.
+  slug String @unique
+
+  /// Which genders this category is offered under. Empty means "any" — the
+  /// storefront then falls back to whichever genders actually have stock.
+  /// Never widens the nav on its own: a category only appears under a gender
+  /// if it ALSO has live products there, so this can hide but never invent.
+  genders Gender[]
+
+  description String?
+  image       String?
+
+  /// Hides the category from the storefront nav and the admin picker without
+  /// touching the products that reference it — they keep their category value
+  /// and stay shoppable by direct link.
+  isActive Boolean @default(true)
+
+  /// Manual ordering for the nav; ties break alphabetically.
+  order Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, order])
+}

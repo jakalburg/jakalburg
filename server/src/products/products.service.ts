@@ -1,6 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, Product, ProductColor } from '@prisma/client';
+import { Gender, Prisma, Product, ProductColor } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
+import { CategoriesService } from '../categories/categories.service';
+import { CACHE_NS, CACHE_TTL, cacheKeyFor } from '../redis/cache-keys';
 import { ProductQueryDto } from './dto/product-query.dto';
 import {
   AdminProductListResponseDto,
@@ -41,7 +44,27 @@ const INCLUDE_COLORS = {
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+    private readonly categories: CategoriesService,
+  ) {}
+
+  /**
+   * Drop every cached product read. Also clears the collection and category
+   * namespaces: a product write changes the `productCount` the nav renders,
+   * and a stale count is exactly the kind of wrongness nobody reports but
+   * everyone sees. Categories go too because their nav/picker lists are
+   * derived from which products exist — adding the first product in a
+   * category has to make that category appear.
+   */
+  private invalidate(): Promise<void> {
+    return this.redis.invalidate(
+      `${CACHE_NS.products}*`,
+      `${CACHE_NS.collections}*`,
+      `${CACHE_NS.categories}*`,
+    );
+  }
 
   /**
    * Storefront product list — filtered, sorted and paginated in the database.
@@ -54,6 +77,37 @@ export class ProductsService {
     const where = this.buildStorefrontWhere(query);
     const params = parsePagination(query);
 
+    // A free-text search mints a key per distinct term — read once, then dead
+    // weight until it expires. Those go straight to Postgres.
+    if (query.search?.trim()) return this.loadAll(where, query, params);
+
+    return this.redis.getOrSet(
+      cacheKeyFor(CACHE_NS.products, {
+        list: 1,
+        category: query.category,
+        collection: query.collection,
+        gender: query.gender,
+        size: query.size,
+        color: query.color,
+        isNew: query.isNew,
+        onSale: query.onSale,
+        essential: query.essential,
+        // Order matters to the key but not to the result, so sort it.
+        ids: query.ids?.length ? [...query.ids].sort().join(',') : undefined,
+        sort: query.sort,
+        page: params.skip,
+        take: params.take,
+      }),
+      CACHE_TTL.productList,
+      () => this.loadAll(where, query, params),
+    );
+  }
+
+  private async loadAll(
+    where: Prisma.ProductWhereInput,
+    query: ProductQueryDto,
+    params: ReturnType<typeof parsePagination>,
+  ): Promise<PaginatedResult<ProductResponseDto>> {
     const [total, products] = await this.prisma.$transaction([
       this.prisma.product.count({ where }),
       this.prisma.product.findMany({
@@ -175,10 +229,17 @@ export class ProductsService {
   async findBySlug(slug: string): Promise<ProductResponseDto> {
     // findFirst (not findUnique) so we can also gate on isActive — a hidden
     // product's detail page should 404 for the storefront.
-    const product = await this.prisma.product.findFirst({
-      where: { slug, isActive: true },
-      include: INCLUDE_COLORS,
-    });
+    // The 404 is raised OUTSIDE the loader so a miss is never cached: an admin
+    // activating a product would otherwise keep 404ing until the TTL expired.
+    const product = await this.redis.getOrSet(
+      `${CACHE_NS.products}slug:${slug}`,
+      CACHE_TTL.productDetail,
+      () =>
+        this.prisma.product.findFirst({
+          where: { slug, isActive: true },
+          include: INCLUDE_COLORS,
+        }),
+    );
     if (!product) {
       throw new NotFoundException(`Product "${slug}" not found`);
     }
@@ -220,14 +281,28 @@ export class ProductsService {
    * same COST caveat as {@link listFacets} applies — Prisma de-duplicates
    * `distinct` in memory, so this reads one narrow column for every product.
    */
-  async listCategories(): Promise<string[]> {
-    const rows = await this.prisma.product.findMany({
-      distinct: ['category'],
-      select: { category: true },
-      where: { category: { not: '' } },
-      orderBy: { category: 'asc' },
-    });
-    return rows.map((r) => r.category);
+  /**
+   * Distinct category slugs.
+   *
+   * Without a gender: every category in the catalogue, hidden products
+   * included. This is the admin's category picker, which must still offer a
+   * category whose products happen to all be switched off right now.
+   *
+   * With a gender: the categories a shopper can actually browse under it —
+   * active products only. The storefront nav reads this, and listing a
+   * category with nothing live in it would just lead to an empty page.
+   *
+   * Gender is matched exactly, with no `unisex` fallthrough, because that is
+   * how `findAll` filters it — if the nav were more generous than the listing
+   * page it would link to categories that come back empty.
+   */
+  async listCategories(gender?: Gender): Promise<string[]> {
+    // Delegated to CategoriesService so the "has stock AND is offered" rule
+    // lives in exactly one place. Without a gender this is still the bare
+    // catalogue-wide list the admin's category picker expects.
+    return gender
+      ? this.categories.listForNav(gender)
+      : this.categories.listInUse();
   }
 
   private resolveSort(
@@ -330,6 +405,7 @@ export class ProductsService {
       },
       include: INCLUDE_COLORS,
     });
+    await this.invalidate();
     return this.toAdminResponse(product);
   }
 
@@ -429,6 +505,7 @@ export class ProductsService {
       data,
       include: INCLUDE_COLORS,
     });
+    await this.invalidate();
     return this.toAdminResponse(product);
   }
 
@@ -440,6 +517,7 @@ export class ProductsService {
       data: { isActive },
       include: INCLUDE_COLORS,
     });
+    await this.invalidate();
     return this.toAdminResponse(product);
   }
 
@@ -452,6 +530,7 @@ export class ProductsService {
       where: { id: { in: productIds } },
       data: { isActive },
     });
+    await this.invalidate();
     return { count: res.count };
   }
 
@@ -459,6 +538,7 @@ export class ProductsService {
   async remove(id: string): Promise<{ success: boolean; id: string }> {
     await this.ensureExists(id);
     await this.prisma.product.delete({ where: { id } });
+    await this.invalidate();
     return { success: true, id };
   }
 

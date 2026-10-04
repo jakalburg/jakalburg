@@ -10,7 +10,7 @@ import { TableSkeleton } from "@/components/admin/table-skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { useDebounce } from "@/hooks/use-debounce";
 import { ProductSortOption } from "@/services/products.service";
-import { useCategories } from "@/hooks/use-categories";
+import { useCategoryOptions } from "@/hooks/use-categories";
 
 const PAGE_SIZE = 10;
 
@@ -30,7 +30,7 @@ export function ProductsTab() {
     category: categoryFilter === "all" ? undefined : categoryFilter,
     status: showDisabled ? "all" : "active",
   });
-  const { data: categories = [] } = useCategories();
+  const { data: categories = [] } = useCategoryOptions();
 
   const products = data?.data ?? [];
   const total = data?.total ?? 0;

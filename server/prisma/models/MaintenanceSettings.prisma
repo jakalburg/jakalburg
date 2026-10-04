@@ -1,0 +1,41 @@
+// Singleton row controlling storefront maintenance mode — the admin's
+// Settings → Maintenance screen writes it; MaintenanceGuard enforces it on
+// every request and the storefront's middleware reads it to gate the site.
+//
+// DELIBERATELY SEPARATE from the `Settings` singleton: that model's GET is
+// public, and `previewTokenHash` is a credential. The public-safe fields are
+// exposed through GET /maintenance/status instead, which returns the banner
+// copy and nothing else.
+//
+// Replaces the old mock-only "Website Countdown" screen. The target time is
+// kept, but it is now presentational ("we expect to be back at…") and drives
+// the countdown on the maintenance page — it NEVER lifts maintenance on its
+// own. Coming back online is always a deliberate act, so an overrunning
+// migration can't reopen the shop behind your back.
+model MaintenanceSettings {
+  id String @id @default(cuid())
+
+  /// Master switch. When true the storefront is blocked and the API answers
+  /// 503 for everything except the admin, admin auth, and the status read.
+  active Boolean @default(false)
+
+  // ---- Customer-facing copy (public, via /maintenance/status) ----
+  title    String?
+  message  String?
+  /// Shown as "expected back at" and used for the countdown. Presentational.
+  endsAt   DateTime?
+  timezone String?   @default("Asia/Kolkata")
+
+  // ---- Preview bypass ----
+  // Only the SHA-256 hash of the preview token is stored; the plaintext is
+  // returned exactly once, when it is generated. Presenting the token (as a
+  // cookie forwarded by the storefront, or an x-maintenance-preview header on
+  // an API call) is what grants a bypass — it is verified server-side with a
+  // constant-time compare on every request, so nothing the browser sends is
+  // trusted on its own and a forged cookie is worthless.
+  previewTokenHash String?
+  previewTokenSetAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

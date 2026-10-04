@@ -17,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import { ProductQueryDto } from './dto/product-query.dto';
+import { CategoryQueryDto } from './dto/category-query.dto';
 import {
   AdminProductListResponseDto,
   AdminProductResponseDto,
@@ -129,14 +130,18 @@ export class ProductsController {
   }
 
   /**
-   * Distinct category slugs across the catalogue. Literal `meta/*` path so it
-   * wins over the `:slug` catch-all below. Feeds the admin category picker.
+   * Distinct category slugs. Literal `meta/*` path so it wins over the
+   * `:slug` catch-all below.
+   *
+   * Bare: the whole catalogue, for the admin category picker.
+   * With `?gender=`: only the categories that have live products for that
+   * gender — what the storefront nav lists, so it can't link to an empty page.
    */
   @Get('meta/categories')
   @ApiOperation({ summary: 'List distinct product categories' })
   @ApiOkResponse({ description: 'Distinct category slugs.', type: [String] })
-  listCategories(): Promise<string[]> {
-    return this.productsService.listCategories();
+  listCategories(@Query() query: CategoryQueryDto): Promise<string[]> {
+    return this.productsService.listCategories(query.gender);
   }
 
   /**

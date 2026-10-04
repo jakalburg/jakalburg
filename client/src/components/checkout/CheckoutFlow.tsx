@@ -15,7 +15,10 @@ import { useAppDispatch, useAppSelector } from "@/redux/hooks";
 import { selectCartItems, selectCartSubtotal, clear_cart } from "@/redux/features/cart-slice";
 import { selectProfile, selectAddresses, add_address, update_profile, type Profile } from "@/redux/features/addresses-slice";
 import { selectAuthUser } from "@/redux/features/auth-slice";
-import { useCreateOrder } from "@/hooks/useOrders";
+import { useCreateOrder, useRazorpayCheckout } from "@/hooks/useOrders";
+import { usePaymentMethods } from "@/hooks/usePaymentMethods";
+import { useSiteSettings } from "@/hooks/useSiteSettings";
+import { openRazorpayCheckout } from "@/lib/razorpay";
 import { apiFetch, ApiError } from "@/lib/api-client";
 import { API_ENDPOINTS } from "@/lib/api-endpoints";
 import { formatINR } from "@/lib/format";
@@ -56,8 +59,11 @@ type ContactForm = z.infer<typeof contactSchema>;
 type AddressForm = z.infer<typeof addressSchema>;
 
 type Step = "contact" | "address" | "shipping" | "payment" | "review";
+
+// What the shopper can actually be charged through. Which of these is offered
+// is decided by the admin (Settings → Payments) and read via usePaymentMethods.
 type Shipping = "standard" | "express";
-type PayMethod = "card" | "upi" | "cod";
+type PayMethod = "razorpay" | "cod";
 
 const shippingRates: Record<Shipping, { label: string; price: number; eta: string }> = {
   standard: { label: "Standard", price: 0, eta: "3–5 business days" },
@@ -89,6 +95,13 @@ export function CheckoutFlow() {
   const user = useAppSelector(selectAuthUser);
   const hydrated = useHydrated();
   const createOrder = useCreateOrder();
+  const { createRazorpayOrder, verifyAndPlace } = useRazorpayCheckout();
+  // Which methods the admin has switched on. The shopper only ever sees these.
+  const { methods, isLoading: methodsLoading } = usePaymentMethods();
+  const { storeName } = useSiteSettings();
+  // True from "pay" until Razorpay settles — covers the window where the
+  // payment sheet is open and the order has not been placed yet.
+  const [paying, setPaying] = useState(false);
   const clearCart = () => dispatch(clear_cart());
   const addAddress = (a: Address) => dispatch(add_address(a));
   const updateProfile = (patch: Partial<Profile>) => dispatch(update_profile(patch));
@@ -102,7 +115,7 @@ export function CheckoutFlow() {
   const [selectedAddressId, setSelectedAddressId] = useState<string>("");
   const [showNewAddress, setShowNewAddress] = useState(false);
   const [shipping, setShipping] = useState<Shipping>("standard");
-  const [payMethod, setPayMethod] = useState<PayMethod>("card");
+  const [payMethod, setPayMethod] = useState<PayMethod>("razorpay");
 
   // Coupon: the shopper types a code and applies it; the server prices the
   // discount against the live subtotal (we never trust a client-computed
@@ -159,6 +172,19 @@ export function CheckoutFlow() {
     setStep("review");
   }, [hydrated, savedAddresses, items.length, contact.email, user?.email, profile.email]);
 
+  // Keep the selection on something the store actually accepts. The default,
+  // and any method remembered from a previous visit, can both be a method the
+  // admin has since switched off — without this a returning shopper lands on
+  // "review" with an unavailable method already chosen.
+  useEffect(() => {
+    if (methodsLoading) return;
+    if (payMethod === "razorpay" && !methods.razorpay && methods.cod) {
+      setPayMethod("cod");
+    } else if (payMethod === "cod" && !methods.cod && methods.razorpay) {
+      setPayMethod("razorpay");
+    }
+  }, [methodsLoading, methods.razorpay, methods.cod, payMethod]);
+
   // Remember the completed set of choices so the next visit can skip to review.
   // Card/UPI inputs are deliberately excluded — only the payment *method* is kept.
   const rememberCheckoutChoices = (chosen: Address) => {
@@ -170,12 +196,8 @@ export function CheckoutFlow() {
     });
   };
 
-  // Transient payment inputs — NEVER written to any store or the mock order
-  // beyond a masked display label at review time.
-  const [cardNumber, setCardNumber] = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
-  const [cardCvv, setCardCvv] = useState("");
-  const [upi, setUpi] = useState("");
+  // No card/UPI fields live here any more: Razorpay collects those in its own
+  // window, on its own domain, so no payment detail ever touches this app.
 
   const contactForm = useForm<ContactForm>({
     resolver: zodResolver(contactSchema),
@@ -228,15 +250,10 @@ export function CheckoutFlow() {
     setCouponInput("");
   };
 
-  const paymentLabel = (): string => {
-    if (payMethod === "cod") return "Cash on Delivery";
-    if (payMethod === "upi") {
-      const handle = upi.split("@")[1];
-      return handle ? `UPI · @${handle}` : "UPI";
-    }
-    const last4 = cardNumber.replace(/\s/g, "").slice(-4) || "4242";
-    return `Card ending •••• ${last4}`;
-  };
+  // Display-only string stored on the order. Razorpay reports the actual
+  // instrument (upi/card/netbanking) and the server records that separately.
+  const paymentLabel = (): string =>
+    payMethod === "cod" ? "Cash on Delivery" : "Paid online";
 
   const onContact: SubmitHandler<ContactForm> = (data) => {
     setContact(data);
@@ -269,47 +286,109 @@ export function CheckoutFlow() {
     setStep("shipping");
   };
 
+  /** Everything the server needs to price and place this order. */
+  const orderPayload = () => ({
+    // Only identity + quantity travel to the server; it prices the order
+    // from the live products so the client can't tamper with totals.
+    items: items.map((i) => ({
+      productId: i.productId,
+      size: i.size,
+      color: i.color,
+      quantity: i.quantity,
+    })),
+    shipping: shippingCost,
+    // The server recomputes the discount from couponCode; discount is sent
+    // only for display parity and is ignored server-side.
+    discount,
+    couponCode: appliedCoupon?.code,
+    address: address!,
+    email: contact.email,
+    paymentLabel: paymentLabel(),
+  });
+
+  // Shared tail of both payment paths: leave checkout for the confirmation.
+  const onOrderPlaced = (orderId: string) => {
+    suppressNextRouteLoader();
+    // Defer clearing the cart until the redirect lands. Clearing it now
+    // empties the cart while the checkout page is still mounted, so it
+    // re-renders into its empty-bag branch and flashes "your bag is empty"
+    // for a beat before navigation completes.
+    void router.push(`/order-confirmation/${orderId}`).then(() => clearCart());
+  };
+
+  /**
+   * Pay online: price it server-side, let Razorpay collect, then verify.
+   *
+   * The cart is only cleared once the server confirms the order — a dismissed
+   * or failed payment leaves the shopper exactly where they were.
+   */
+  const payWithRazorpay = async () => {
+    const payload = orderPayload();
+    setPaying(true);
+    try {
+      const rp = await createRazorpayOrder(payload);
+
+      const result = await openRazorpayCheckout({
+        key: rp.keyId,
+        amount: rp.amount,
+        currency: rp.currency,
+        order_id: rp.razorpayOrderId,
+        name: storeName,
+        description: `Order · ${items.length} item${items.length === 1 ? "" : "s"}`,
+        prefill: {
+          name: address?.fullName,
+          email: contact.email,
+          contact: address?.phone,
+        },
+      });
+
+      // Dismissed the window — not an error, nothing was charged.
+      if (!result) return;
+
+      const order = await verifyAndPlace({
+        razorpayOrderId: result.razorpay_order_id,
+        razorpayPaymentId: result.razorpay_payment_id,
+        razorpaySignature: result.razorpay_signature,
+        order: payload,
+      });
+      onOrderPlaced(order.id);
+    } catch (err) {
+      // The server answers a captured-but-unplaceable payment with a reference
+      // to quote. Surface it prominently — the shopper HAS been charged, and
+      // "something went wrong" would be an outright lie here.
+      const reference =
+        err instanceof ApiError && typeof err.body?.reference === "string"
+          ? err.body.reference
+          : undefined;
+
+      if (reference) {
+        toast.error("Your payment went through, but we couldn't place the order", {
+          description: `Nothing further will be charged. Please contact us quoting ${reference}.`,
+          duration: Infinity,
+        });
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : "Payment could not be completed.");
+    } finally {
+      setPaying(false);
+    }
+  };
+
   const placeOrder = () => {
-    if (!address || createOrder.isPending) return;
-    // The address is already saved to the book; the order snapshots it server-side.
-    createOrder.mutate(
-      {
-        // Only identity + quantity travel to the server; it prices the order
-        // from the live products so the client can't tamper with totals.
-        items: items.map((i) => ({
-          productId: i.productId,
-          size: i.size,
-          color: i.color,
-          quantity: i.quantity,
-        })),
-        shipping: shippingCost,
-        // The server recomputes the discount from couponCode; discount is sent
-        // only for display parity and is ignored server-side.
-        discount,
-        couponCode: appliedCoupon?.code,
-        address,
-        email: contact.email,
-        paymentLabel: paymentLabel(),
+    if (!address || createOrder.isPending || paying) return;
+
+    if (payMethod === "razorpay") {
+      void payWithRazorpay();
+      return;
+    }
+
+    // Cash on delivery — no payment step, the order is written straight away.
+    createOrder.mutate(orderPayload(), {
+      onSuccess: (order) => onOrderPlaced(order.id),
+      onError: (err) => {
+        toast.error(err instanceof Error ? err.message : "Could not place your order.");
       },
-      {
-        onSuccess: (order) => {
-          // Clear all payment inputs so nothing lingers beyond the masked label.
-          setCardNumber("");
-          setCardExpiry("");
-          setCardCvv("");
-          setUpi("");
-          suppressNextRouteLoader();
-          // Defer clearing the cart until the redirect lands. Clearing it now
-          // empties the cart while the checkout page is still mounted, so it
-          // re-renders into its empty-bag branch and flashes "your bag is empty"
-          // for a beat before navigation completes.
-          void router.push(`/order-confirmation/${order.id}`).then(() => clearCart());
-        },
-        onError: (err) => {
-          toast.error(err instanceof Error ? err.message : "Could not place your order.");
-        },
-      },
-    );
+    });
   };
 
   // Per-field edit affordance on the review step — jump back to the step that
@@ -470,74 +549,47 @@ export function CheckoutFlow() {
         {step === "payment" && (
           <div className="max-w-md space-y-4">
             <h2 className="text-xl">Payment</h2>
-            <DemoBanner text="No payment details are stored. This is a demo." />
-            <RadioGroup value={payMethod} onValueChange={(v) => setPayMethod(v as PayMethod)}>
-              <label className="flex items-center gap-3 border p-4">
-                <RadioGroupItem value="card" id="pm-card" /> <span>Credit or debit card</span>
-              </label>
-              <label className="flex items-center gap-3 border p-4">
-                <RadioGroupItem value="upi" id="pm-upi" /> <span>UPI</span>
-              </label>
-              <label className="flex items-center gap-3 border p-4">
-                <RadioGroupItem value="cod" id="pm-cod" /> <span>Cash on Delivery</span>
-              </label>
-            </RadioGroup>
 
-            {payMethod === "card" && (
-              <div className="space-y-3">
-                <div>
-                  <Label htmlFor="cardNumber">Card number</Label>
-                  <Input
-                    id="cardNumber"
-                    inputMode="numeric"
-                    placeholder="4242 4242 4242 4242"
-                    value={cardNumber}
-                    onChange={(e) => setCardNumber(e.target.value)}
-                    autoComplete="off"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label htmlFor="expiry">Expiry</Label>
-                    <Input
-                      id="expiry"
-                      placeholder="MM / YY"
-                      value={cardExpiry}
-                      onChange={(e) => setCardExpiry(e.target.value)}
-                      autoComplete="off"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="cvv">CVV</Label>
-                    <Input
-                      id="cvv"
-                      inputMode="numeric"
-                      placeholder="123"
-                      value={cardCvv}
-                      onChange={(e) => setCardCvv(e.target.value)}
-                      autoComplete="off"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {payMethod === "upi" && (
-              <div>
-                <Label htmlFor="upi">UPI ID</Label>
-                <Input
-                  id="upi"
-                  placeholder="name@bank"
-                  value={upi}
-                  onChange={(e) => setUpi(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
+            {methodsLoading ? (
+              <p className="text-sm text-muted-foreground">Loading payment options…</p>
+            ) : !methods.cod && !methods.razorpay ? (
+              // The admin has turned everything off, or the API is unreachable.
+              // Say so plainly rather than showing an empty box.
+              <p className="border p-4 text-sm text-muted-foreground">
+                No payment method is available right now. Please try again
+                shortly or get in touch.
+              </p>
+            ) : (
+              <RadioGroup value={payMethod} onValueChange={(v) => setPayMethod(v as PayMethod)}>
+                {methods.razorpay && (
+                  <label className="flex items-start gap-3 border p-4">
+                    <RadioGroupItem value="razorpay" id="pm-razorpay" className="mt-0.5" />
+                    <span>
+                      Pay online
+                      <span className="block text-xs text-mute-text">
+                        UPI, cards and netbanking, handled securely by Razorpay.
+                      </span>
+                    </span>
+                  </label>
+                )}
+                {methods.cod && (
+                  <label className="flex items-start gap-3 border p-4">
+                    <RadioGroupItem value="cod" id="pm-cod" className="mt-0.5" />
+                    <span>
+                      Cash on Delivery
+                      <span className="block text-xs text-mute-text">
+                        Pay the full amount when your order arrives.
+                      </span>
+                    </span>
+                  </label>
+                )}
+              </RadioGroup>
             )}
 
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep("shipping")}>Back</Button>
               <Button
+                disabled={!methods.cod && !methods.razorpay}
                 onClick={() => {
                   // All four choices are settled by now — persist them so a
                   // return visit lands on review instead of the first step.
@@ -592,8 +644,14 @@ export function CheckoutFlow() {
             </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep("payment")}>Back</Button>
-              <Button onClick={placeOrder} loading={createOrder.isPending} disabled={items.length === 0}>
-                Place order
+              <Button
+                onClick={placeOrder}
+                loading={createOrder.isPending || paying}
+                disabled={
+                  items.length === 0 || (!methods.cod && !methods.razorpay)
+                }
+              >
+                {payMethod === "razorpay" ? "Pay & place order" : "Place order"}
               </Button>
             </div>
           </div>

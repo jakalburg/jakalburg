@@ -5,7 +5,6 @@ export * from "./coupons.service";
 export * from "./orders.service";
 export * from "./dashboard.service";
 export * from "./upload.service";
-export * from "./brands.service";
 export * from "./collections.service";
 export * from "./customers.service";
 export * from "./website.service";

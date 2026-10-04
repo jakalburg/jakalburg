@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { womenCategories, menCategories } from "@/data/categories";
-import { collections } from "@/data/collections";
+import { useCollections } from "@/hooks/useCollections";
+import { useNavCategories } from "@/hooks/useNavCategories";
+import { collections as staticCollections } from "@/data/collections";
 import { ImageShimmer } from "@/components/ui/image-shimmer";
 
 interface Props {
@@ -8,8 +9,31 @@ interface Props {
   onNavigate?: () => void;
 }
 
+/**
+ * Desktop mega-menu. Reads the same live categories and collections the mobile
+ * drawer does — when these were two hardcoded lists the two menus could, and
+ * did, disagree about what the shop sells.
+ */
 export function MegaMenu({ section, onNavigate }: Props) {
-  const cats = section === "women" ? womenCategories : menCategories;
+  const { categories: cats } = useNavCategories(section);
+  const { data: apiCollections } = useCollections();
+
+  // The shipped set only stands in when the API gives us nothing, so the menu
+  // never renders an empty column. Tiles need an image, which the API may not
+  // have for every collection.
+  const tiles = (apiCollections ?? []).length
+    ? (apiCollections ?? []).map((c) => ({
+        slug: c.slug,
+        title: c.title,
+        tagline: c.subtitle ?? "",
+        image: c.image ?? undefined,
+      }))
+    : staticCollections.map((c) => ({
+        slug: c.slug,
+        title: c.title,
+        tagline: c.tagline,
+        image: c.image as string | undefined,
+      }));
   return (
     <div className="hidden lg:block">
       <div className="grid grid-cols-4 gap-10 p-8">
@@ -61,7 +85,7 @@ export function MegaMenu({ section, onNavigate }: Props) {
         <div className="col-span-2">
           <p className="eyebrow mb-4 text-mute-text">Collections</p>
           <div className="grid grid-cols-2 gap-4">
-            {collections.slice(0, 4).map((c) => (
+            {tiles.slice(0, 4).map((c) => (
               <Link
                 key={c.slug}
                 href={`/collections/${c.slug}`}
@@ -69,11 +93,13 @@ export function MegaMenu({ section, onNavigate }: Props) {
                 className="group block"
               >
                 <div className="aspect-[4/3] overflow-hidden bg-stone">
-                  <ImageShimmer
-                    src={c.image}
-                    alt={c.title}
-                    wrapperClassName="h-full w-full transition duration-500 group-hover:scale-[1.02]"
-                  />
+                  {c.image && (
+                    <ImageShimmer
+                      src={c.image}
+                      alt={c.title}
+                      wrapperClassName="h-full w-full transition duration-500 group-hover:scale-[1.02]"
+                    />
+                  )}
                 </div>
                 <p className="mt-2 text-sm font-medium">{c.title}</p>
                 <p className="text-xs text-mute-text">{c.tagline}</p>

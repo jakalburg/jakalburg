@@ -27,6 +27,14 @@ export interface WebsiteHomeSection {
   data?: any;
 }
 
+export interface SeedHomeSectionsResult {
+  /** Canonical sections that were missing and have been created. */
+  seeded: number;
+  /** Rows deleted because the storefront no longer renders their type. */
+  removed: number;
+  total: number;
+}
+
 export const websiteService = (_api: AxiosInstance) => ({
   async getAllHomeSections(): Promise<WebsiteHomeSection[]> {
     const response = await realApi.get(API_ENDPOINTS.website.homeSections.all);
@@ -44,7 +52,12 @@ export const websiteService = (_api: AxiosInstance) => ({
     return response.data;
   },
 
-  async seedHomeSections(): Promise<any> {
+  /**
+   * Sync the stored sections to the canonical list. Adds anything missing and
+   * removes rows the storefront has no renderer for, so the counts tell the
+   * admin what actually changed.
+   */
+  async seedHomeSections(): Promise<SeedHomeSectionsResult> {
     const response = await realApi.post(
       API_ENDPOINTS.website.homeSections.seed,
     );

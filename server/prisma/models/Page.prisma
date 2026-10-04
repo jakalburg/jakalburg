@@ -1,0 +1,29 @@
+// Editable storefront "static" pages — Shipping, Returns, Privacy, Terms and
+// the FAQ. The admin's Website → Static Pages screen writes them; the
+// storefront renders them by slug, where the slug IS the client route
+// (e.g. "shipping-policy" → /shipping-policy).
+//
+// `content` holds rich-text HTML from the admin's Quill editor and backs every
+// page EXCEPT the FAQ. The FAQ uses `faqSections` instead — structured JSON of
+// the shape [{ heading, items: [{ question, answer }] }], so Q&A is grouped
+// under headings on the storefront. Keeping that structured (rather than
+// serialising Q&A into `content` HTML and re-parsing it on edit, the way the
+// kaybykhushie reference does) makes the admin round-trip lossless.
+//
+// `status` is "active" | "inactive"; the public list endpoint returns only
+// active pages, so an admin can draft one without exposing it.
+model Page {
+  id    String @id @default(cuid())
+  title String
+  slug  String @unique
+
+  content     String @default("")
+  faqSections Json?
+
+  status String @default("active")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}

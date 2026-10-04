@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import useAxiosAuth from "./use-axios-auth";
 import { realApi } from "@/lib/api/real-axios";
+import API_ENDPOINTS from "@/config/endpoints";
 import { toast } from "sonner";
 
 export interface WebsiteAboutData {
@@ -35,13 +35,15 @@ export interface WebsiteContactData {
   needTodayDescription?: string;
 }
 
+// About page content is wired to the REAL backend (server WebsiteAbout
+// singleton). GET is public; PATCH is admin-only — realApi attaches the admin JWT.
 export function useGetAbout(options?: { enabled?: boolean }) {
-  const axiosAuth = useAxiosAuth();
-
   return useQuery({
     queryKey: ["website-about"],
     queryFn: async () => {
-      const { data } = await axiosAuth.get<WebsiteAboutData>("/website/about");
+      const { data } = await realApi.get<WebsiteAboutData>(
+        API_ENDPOINTS.website.about,
+      );
       return data;
     },
     enabled: options?.enabled,
@@ -49,12 +51,11 @@ export function useGetAbout(options?: { enabled?: boolean }) {
 }
 
 export function useUpdateAbout() {
-  const axiosAuth = useAxiosAuth();
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (data: Partial<WebsiteAboutData>) => {
-      const res = await axiosAuth.patch("/website/about", data);
+      const res = await realApi.patch(API_ENDPOINTS.website.about, data);
       return res.data;
     },
     onSuccess: () => {
@@ -76,7 +77,7 @@ export function useGetContact(options?: { enabled?: boolean }) {
     queryKey: ["website-contact"],
     queryFn: async () => {
       const { data } =
-        await realApi.get<WebsiteContactData>("/website/contact");
+        await realApi.get<WebsiteContactData>(API_ENDPOINTS.website.contact);
       return data;
     },
     enabled: options?.enabled,
@@ -88,7 +89,7 @@ export function useUpdateContact() {
 
   return useMutation({
     mutationFn: async (data: Partial<WebsiteContactData>) => {
-      const res = await realApi.patch("/website/contact", data);
+      const res = await realApi.patch(API_ENDPOINTS.website.contact, data);
       return res.data;
     },
     onSuccess: () => {

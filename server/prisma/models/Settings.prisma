@@ -1,0 +1,48 @@
+// Singleton row of global store identity — the admin's Settings → Store screen
+// writes it; the whole storefront reads it (public). One row only; the service
+// creates it on first read and updates it in place.
+//
+// This is the single source of truth for everything that answers "who is this
+// shop": the marks, the name, the contact details and the social accounts. The
+// storefront header, footer, SEO tags and /contact page all read from here, so
+// an edit in the admin shows up everywhere without a redeploy.
+//
+// Contact details (email/phone/address/mapLink) used to live on WebsiteContact.
+// They moved here because they are global, not contact-page-specific — the
+// footer and SEO want them too. WebsiteContact keeps only the contact PAGE copy
+// (heading, blurb). The service back-fills these four from the existing
+// WebsiteContact row the first time it creates this one, so nothing is lost.
+//
+// All fields are optional so a fresh install renders the storefront's built-in
+// fallbacks rather than blank space.
+model Settings {
+  id String @id @default(cuid())
+
+  // ---- Brand identity ----
+  storeName String? // "Jakalburg" — used in the logo alt text, footer and SEO
+  tagline   String? // one-line description under the footer logo
+  logo      String? // full wordmark; the header and footer render this
+  miniLogo  String? // square/compact mark for tight spots and og:image
+  favicon   String? // browser tab icon; overrides the bundled /favicon.png
+
+  // ---- Global contact details (authoritative; see note above) ----
+  email   String? // support / contact email
+  phone   String? // support / contact phone
+  address String? // full store address
+  mapLink String? // Google Maps URL — the address links to it when set
+
+  // ---- Social accounts; the footer renders an icon per non-empty URL ----
+  facebookUrl  String?
+  instagramUrl String?
+  twitterUrl   String?
+  linkedinUrl  String?
+  youtubeUrl   String?
+
+  // ---- SEO defaults, consumed by the storefront's <SEO> component ----
+  seoTitle       String? // default <title> and og:title
+  seoDescription String? // default meta description
+  siteUrl        String? // absolute origin used to build canonical URLs
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

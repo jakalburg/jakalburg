@@ -28,6 +28,10 @@ export interface PaginationParams {
 /** Rows per page across admin tables, and batch size for scroll-loaded dropdowns. */
 export const DEFAULT_PAGE_SIZE = 10;
 
+/** The server's hard ceiling on `limit` (`server/src/common/pagination`).
+ *  What a dropdown asks for when it genuinely needs every row at once. */
+export const MAX_PAGE_SIZE = 100;
+
 /**
  * Normalise whatever a list endpoint returned into a `Paginated<T>`.
  *

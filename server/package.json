@@ -16,7 +16,9 @@
     "prisma:generate": "npm run prisma:build && prisma generate",
     "prisma:migrate": "npm run prisma:build && prisma db push",
     "prisma:studio": "npm run prisma:build && prisma studio",
-    "db:seed": "npm run prisma:generate && prisma db seed"
+    "db:seed": "npm run prisma:generate && prisma db seed",
+    "db:seed:pages": "ts-node --project prisma/tsconfig.seed.json prisma/seed-pages.ts",
+    "db:seed:logos": "ts-node --project prisma/tsconfig.seed.json prisma/seed-logos.ts"
   },
   "prisma": {
     "seed": "ts-node --compiler-options {\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"} prisma/seed.ts"
@@ -26,6 +28,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1146.0",
     "@nestjs/common": "^11.0.17",
     "@nestjs/core": "^11.0.1",
     "@nestjs/jwt": "^11.0.1",
@@ -36,6 +39,8 @@
     "@prisma/client": "^6.17.1",
     "@types/bcrypt": "^6.0.0",
     "@types/passport-jwt": "^4.0.1",
+    "@types/sanitize-html": "^2.16.2",
+    "@upstash/redis": "^1.39.0",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
@@ -49,8 +54,10 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "prisma": "^6.17.1",
+    "razorpay": "^2.9.8",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "sanitize-html": "^2.18.0",
     "typescript": "^5.9.3"
   },
   "devDependencies": {

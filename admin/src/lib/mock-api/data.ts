@@ -354,54 +354,6 @@ export const mockCoupons: any[] = [
   { id: "coupon-6", couponCode: "NEWYEAR", title: "New Year Special", discountType: "fixed", discountAmount: 1000, minimumAmount: 7999, endDate: T(-60), status: "active", usageCount: 12, maxUsage: 250, productType: "all", createdAt: T(15), updatedAt: T(2) },
 ];
 
-// ==================== LOGS ====================
-const LOG_SEED: Array<[string, string, string, string, number]> = [
-  ["Failed to process payment webhook", "payment_error", "critical", "server", 5],
-  ["Product image upload timed out", "upload_failure", "warning", "admin", 12],
-  ["Unhandled promise rejection in checkout", "runtime_error", "error", "client", 3],
-  ["Rate limit exceeded on /products", "rate_limit", "warning", "server", 41],
-  ["Invalid coupon code submitted", "validation_error", "info", "client", 88],
-  ["Database connection pool exhausted", "db_error", "critical", "server", 2],
-  ["404 on legacy route /shop/old", "not_found", "info", "client", 210],
-  ["Email delivery bounced", "email_error", "error", "server", 7],
-  ["Slow query detected on orders list", "performance", "warning", "server", 19],
-  ["CSRF token mismatch", "security", "error", "server", 4],
-];
-
-export const mockLogs: any[] = LOG_SEED.map(([message, errorType, severity, source, count], i) => ({
-  id: `log-${String(i + 1).padStart(3, "0")}`,
-  message,
-  stack: `Error: ${message}\n    at handler (/app/src/${source}/index.ts:${40 + i}:12)\n    at process (/app/node_modules/next/dist/server.js:120:9)`,
-  errorType,
-  severity,
-  source,
-  endpoint: ["/api/payment", "/api/media", "/checkout", "/api/products", "/api/coupon"][i % 5],
-  method: ["POST", "POST", "GET", "GET", "POST"][i % 5],
-  statusCode: [500, 408, 500, 429, 400, 503, 404, 502, 200, 403][i],
-  requestId: `req_${1000 + i}`,
-  userId: i % 3 === 0 ? mockCustomers[i % mockCustomers.length].id : undefined,
-  userEmail: i % 3 === 0 ? mockCustomers[i % mockCustomers.length].email : undefined,
-  userName: i % 3 === 0 ? mockCustomers[i % mockCustomers.length].name : undefined,
-  ipAddress: `103.21.${i}.${100 + i}`,
-  deviceType: i % 2 === 0 ? "desktop" : "mobile",
-  browser: i % 2 === 0 ? "Chrome 128" : "Safari 17",
-  os: i % 2 === 0 ? "Windows 11" : "iOS 18",
-  screenSize: i % 2 === 0 ? "1920x1080" : "390x844",
-  pageUrl: "https://kaybykhushie.com/checkout",
-  appVersion: "1.0.0",
-  environment: "production",
-  metadata: { attempt: (i % 3) + 1 },
-  fingerprint: `fp_${errorType}_${i}`,
-  occurrenceCount: count,
-  firstOccurredAt: T(30 - i),
-  lastOccurredAt: T(i % 7),
-  status: i % 3 === 0 ? "resolved" : "unresolved",
-  resolvedAt: i % 3 === 0 ? T(i % 5) : undefined,
-  resolvedByName: i % 3 === 0 ? "Admin User" : undefined,
-  createdAt: T(30 - i),
-  updatedAt: T(i % 7),
-}));
-
 // ==================== PAGES ====================
 export const mockPages: any[] = [
   { id: "page-about", title: "About Us", slug: "about-us", content: "<h1>About KAY by Khushie</h1><p>Our story...</p>", status: "active", createdAt: T(200), updatedAt: T(10) },
@@ -417,7 +369,6 @@ export const mockNotifications: any[] = [
   { id: "notif-2", type: "stock", title: "Low stock alert", message: "Crescent Moon Hoops is running low (18 left).", isRead: false, link: "/products", createdAt: T(0, 7, 15) },
   { id: "notif-3", type: "review", title: "New review pending", message: "A review for Tennis Bracelet needs approval.", isRead: false, link: "/catalog", createdAt: T(1, 18, 0) },
   { id: "notif-4", type: "order", title: "Order shipped", message: "Order INV-2026-0011 was marked shipped.", isRead: true, link: "/orders", createdAt: T(2, 12, 0) },
-  { id: "notif-5", type: "system", title: "Backup completed", message: "Nightly backup completed successfully.", isRead: true, link: "/logs", createdAt: T(3, 2, 0) },
   { id: "notif-6", type: "stock", title: "Out of stock", message: "Heart Locket Pendant is out of stock.", isRead: true, link: "/products", createdAt: T(4, 9, 0) },
 ];
 

@@ -1,0 +1,43 @@
+// A payment Razorpay confirmed as captured, for which the order could NOT be
+// written. The whole point of this table is that such a payment is never
+// silently dropped.
+//
+// Verification runs in two halves (see OrdersController.verifyRazorpay). Before
+// the signature and the Razorpay-side fetch both pass, no money has moved and a
+// plain 400 is safe. After they pass, real money HAS moved — so any later
+// failure (the cart changed, a product vanished, the database timed out) cannot
+// just return an error: the customer has paid. Those land here instead, and the
+// customer gets a reference number to quote rather than "payment failed".
+//
+// Rows are resolved by hand: refund via the Razorpay dashboard, or place the
+// order manually, then mark it resolved. An unresolved row means someone is out
+// of pocket, so this table should normally be empty.
+model PaymentIssue {
+  id String @id @default(cuid())
+
+  // Quoted to the customer and used by the admin to find the row.
+  reference String @unique
+
+  // Razorpay's identifiers for the captured payment, for the dashboard lookup.
+  razorpayOrderId   String?
+  razorpayPaymentId String? @unique // one issue per payment, so a retry reuses the row
+  amountPaise       Int // what Razorpay actually captured, not what we expected
+
+  // Who paid, when we can tell. Null for a guest or an unrecognised session.
+  userId String?
+  email  String?
+
+  // Why the order could not be saved. Internal — shown to the admin, not the
+  // customer.
+  failureReason String
+
+  status     String    @default("open") // "open" | "resolved"
+  resolvedAt DateTime?
+  // Free-text note from whoever resolved it: refund id, manual order number, …
+  resolution String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+}

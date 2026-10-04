@@ -23,6 +23,10 @@ export const API_ENDPOINTS = {
     // Distinct sizes/colours across everything matching the same filters —
     // the listing pages' filter chips, which a single page can't supply.
     facets: "/api/products/meta/facets",
+    // Distinct category slugs. With ?gender= it returns only the categories
+    // that have live products for that gender — what the nav lists, so it
+    // can never link to an empty category page.
+    categories: "/api/products/meta/categories",
     detail: (slug: string) => `/api/products/${encodeURIComponent(slug)}`,
     related: (slug: string) => `/api/products/${encodeURIComponent(slug)}/related`,
   },
@@ -72,12 +76,42 @@ export const API_ENDPOINTS = {
   // hero slider's slides (empty array when none/disabled → static fallback).
   website: {
     hero: "/api/website/home-sections/hero",
+    // Every enabled home section in render order — the home page builds itself
+    // from this. Also carries the Footer row, whose `data` holds the site-wide
+    // footer background images.
+    homeSections: "/api/website/home-sections/public",
     // Public Contact page content (details + copy), edited in the admin.
     contact: "/api/website/contact",
+    // Public About page content (hero, heading, body), edited in the admin.
+    about: "/api/website/about",
+  },
+  // Editable static pages (Shipping, Returns, Privacy, Terms, FAQ). The slug
+  // IS this storefront's route, so /shipping-policy reads slug
+  // "shipping-policy". Public; inactive pages 404.
+  pages: {
+    bySlug: (slug: string) => `/api/pages/slug/${slug}`,
+    // Every PUBLISHED page, for the nav. Unpublishing a page in the admin
+    // takes its link out of the menu instead of leaving a dead one behind.
+    list: "/api/pages",
   },
   // Storefront contact form + newsletter signup. Public POST; both feed the
   // admin Contact inbox (discriminated by `type`: "contact_us" | "newsletter").
   contact: {
     submit: "/api/contact",
+  },
+  // Global store identity — brand marks, store name, contact details, social
+  // accounts and SEO defaults. Edited in the admin's Settings → Store screen
+  // and read by the header, footer, SEO tags and /contact page. Public.
+  settings: {
+    get: "/api/settings",
+  },
+  // Checkout payment. `methods` is public and says which options to show (plus
+  // Razorpay's publishable key); the other two are the online payment handshake
+  // — the server prices the cart, Razorpay collects, the server verifies the
+  // signature and only then writes the order.
+  payments: {
+    methods: "/api/payments/methods",
+    razorpayOrder: "/api/orders/razorpay-order",
+    verifyRazorpay: "/api/orders/verify-razorpay",
   },
 } as const;

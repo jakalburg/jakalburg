@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSession } from "@/lib/mock-auth";
 import {
   Card,
   CardContent,
@@ -11,68 +10,107 @@ import {
 } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertCircle } from "lucide-react";
 import {
   useNotificationSettings,
   useUpdateNotificationSettings,
+  type NotificationSettingsUpdate,
 } from "@/hooks/use-notifications";
-import { Skeleton } from "@/components/ui/skeleton";
+
+type Prefs = Required<NotificationSettingsUpdate>;
+
+const FALLBACK: Prefs = {
+  emailOrderPlaced: true,
+  emailOrderShipped: true,
+  emailOrderCancelled: true,
+  inAppOrderPlaced: true,
+  inAppOrderShipped: true,
+  inAppOrderCancelled: true,
+};
+
+/**
+ * Copy is deliberately specific about WHO receives each email, because the
+ * three are not the same: the first goes to the store owner, the other two go
+ * to the customer. Describing all three as "receive an email" (as the mock
+ * version did) reads as if the owner gets mailed when they themselves mark an
+ * order shipped, which is not what any of them do.
+ */
+const EMAIL_ROWS: { key: keyof Prefs; label: string; help: string }[] = [
+  {
+    key: "emailOrderPlaced",
+    label: "New orders",
+    help: "Email you when a customer places an order. Goes to the owner address in Settings → Email.",
+  },
+  {
+    key: "emailOrderShipped",
+    label: "Order shipped",
+    help: "Email the customer when their order is marked as shipped.",
+  },
+  {
+    key: "emailOrderCancelled",
+    label: "Order cancelled",
+    help: "Email the customer when their order is cancelled.",
+  },
+];
+
+const IN_APP_ROWS: { key: keyof Prefs; label: string; help: string }[] = [
+  {
+    key: "inAppOrderPlaced",
+    label: "New orders",
+    help: "Show a bell alert when a customer places an order.",
+  },
+  {
+    key: "inAppOrderShipped",
+    label: "Order shipped",
+    help: "Show a bell alert when an order is marked as shipped.",
+  },
+  {
+    key: "inAppOrderCancelled",
+    label: "Order cancelled",
+    help: "Show a bell alert when an order is cancelled.",
+  },
+];
 
 export function NotificationsTab() {
-  const { data: session } = useSession();
-  const userId = (session?.user as any)?.id;
+  const { data: serverSettings, isLoading, isError } = useNotificationSettings();
+  const updateSettings = useUpdateNotificationSettings();
 
-  const { data: serverSettings, isLoading } = useNotificationSettings(userId);
-  const updateSettingsMutation = useUpdateNotificationSettings();
-
-  const [notificationSettings, setNotificationSettings] = useState({
-    emailOrderPlaced: true,
-    emailOrderShipped: true,
-    emailOrderCancelled: true,
-    inAppOrderPlaced: true,
-    inAppOrderShipped: true,
-    inAppOrderCancelled: true,
-  });
+  const [prefs, setPrefs] = useState<Prefs>(FALLBACK);
 
   useEffect(() => {
-    if (serverSettings) {
-      setNotificationSettings({
-        emailOrderPlaced: serverSettings.emailOrderPlaced,
-        emailOrderShipped: serverSettings.emailOrderShipped,
-        emailOrderCancelled: serverSettings.emailOrderCancelled,
-        inAppOrderPlaced: serverSettings.inAppOrderPlaced,
-        inAppOrderShipped: serverSettings.inAppOrderShipped,
-        inAppOrderCancelled: serverSettings.inAppOrderCancelled,
-      });
-    }
+    if (!serverSettings) return;
+    const { id: _id, ...rest } = serverSettings;
+    setPrefs(rest);
   }, [serverSettings]);
 
-  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const autoSaveNotifications = useCallback(
-    (newSettings: typeof notificationSettings) => {
-      if (!userId) return;
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(() => {
-        updateSettingsMutation.mutate({ userId, settings: newSettings });
-      }, 500);
     },
-    [userId, updateSettingsMutation],
+    [],
   );
 
-  const handleToggleChange = useCallback(
-    (field: keyof typeof notificationSettings, value: boolean) => {
-      const newSettings = { ...notificationSettings, [field]: value };
-      setNotificationSettings(newSettings);
-      autoSaveNotifications(newSettings);
+  const handleToggle = useCallback(
+    (field: keyof Prefs, value: boolean) => {
+      const next = { ...prefs, [field]: value };
+      setPrefs(next);
+      // Debounced so flipping several switches in a row is one request.
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        updateSettings.mutate(next);
+      }, 500);
     },
-    [notificationSettings, autoSaveNotifications],
+    [prefs, updateSettings],
   );
 
   if (isLoading) {
     return (
       <Card>
         <CardHeader>
-          <Skeleton className="h-6 w-1/3 mb-2" />
+          <Skeleton className="mb-2 h-6 w-1/3" />
           <Skeleton className="h-4 w-1/2" />
         </CardHeader>
         <CardContent className="space-y-4">
@@ -84,113 +122,61 @@ export function NotificationsTab() {
     );
   }
 
+  const rows = (list: typeof EMAIL_ROWS) =>
+    list.map((row, i) => (
+      <div key={row.key}>
+        {i > 0 && <Separator className="my-4" />}
+        <div className="flex items-center justify-between gap-6">
+          <div className="space-y-0.5">
+            <div className="text-base font-medium">{row.label}</div>
+            <p className="text-sm text-muted-foreground">{row.help}</p>
+          </div>
+          <Switch
+            checked={prefs[row.key]}
+            disabled={isError}
+            onCheckedChange={(checked) => handleToggle(row.key, checked)}
+          />
+        </div>
+      </div>
+    ));
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Notification Preferences</CardTitle>
         <CardDescription>
-          Choose what events you want to be notified about. Changes auto-save.
+          Choose what you and your customers are told about. Changes auto-save.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-8">
+        {isError && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Couldn&apos;t load notification settings. Until this loads, the
+              server falls back to sending every notification.
+            </AlertDescription>
+          </Alert>
+        )}
+
         <div>
-          <h3 className="text-lg font-medium mb-4">Email Notifications</h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <div className="text-base font-medium">New Orders</div>
-                <p className="text-sm text-muted-foreground">
-                  Receive an email when a customer places a new order.
-                </p>
-              </div>
-              <Switch
-                checked={notificationSettings.emailOrderPlaced}
-                onCheckedChange={(checked) =>
-                  handleToggleChange("emailOrderPlaced", checked)
-                }
-              />
-            </div>
-            <Separator />
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <div className="text-base font-medium">Order Shipped</div>
-                <p className="text-sm text-muted-foreground">
-                  Receive an email when an order is marked as shipped.
-                </p>
-              </div>
-              <Switch
-                checked={notificationSettings.emailOrderShipped}
-                onCheckedChange={(checked) =>
-                  handleToggleChange("emailOrderShipped", checked)
-                }
-              />
-            </div>
-            <Separator />
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <div className="text-base font-medium">Order Cancelled</div>
-                <p className="text-sm text-muted-foreground">
-                  Receive an email if an order is cancelled.
-                </p>
-              </div>
-              <Switch
-                checked={notificationSettings.emailOrderCancelled}
-                onCheckedChange={(checked) =>
-                  handleToggleChange("emailOrderCancelled", checked)
-                }
-              />
-            </div>
-          </div>
+          <h3 className="mb-4 text-lg font-medium">Email Notifications</h3>
+          {rows(EMAIL_ROWS)}
+          <p className="mt-4 text-xs text-muted-foreground">
+            Order confirmations to customers are always sent — they&apos;re the
+            receipt for a purchase, not a notification. The &ldquo;Notify
+            customer&rdquo; checkbox on an order still applies on top of the two
+            switches above: both must be on for that email to go out.
+          </p>
         </div>
 
-        <div className="pt-4 border-t">
-          <h3 className="text-lg font-medium mb-4">In-App Alerts</h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <div className="text-base font-medium">New Orders</div>
-                <p className="text-sm text-muted-foreground">
-                  Show a notification bell alert for new orders.
-                </p>
-              </div>
-              <Switch
-                checked={notificationSettings.inAppOrderPlaced}
-                onCheckedChange={(checked) =>
-                  handleToggleChange("inAppOrderPlaced", checked)
-                }
-              />
-            </div>
-            <Separator />
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <div className="text-base font-medium">Order Shipped</div>
-                <p className="text-sm text-muted-foreground">
-                  Show an alert when an order status changes to shipped.
-                </p>
-              </div>
-              <Switch
-                checked={notificationSettings.inAppOrderShipped}
-                onCheckedChange={(checked) =>
-                  handleToggleChange("inAppOrderShipped", checked)
-                }
-              />
-            </div>
-            <Separator />
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <div className="text-base font-medium">Order Cancelled</div>
-                <p className="text-sm text-muted-foreground">
-                  Show an alert when an order is cancelled.
-                </p>
-              </div>
-              <Switch
-                checked={notificationSettings.inAppOrderCancelled}
-                onCheckedChange={(checked) =>
-                  handleToggleChange("inAppOrderCancelled", checked)
-                }
-              />
-            </div>
-          </div>
+        <div className="border-t pt-6">
+          <h3 className="mb-4 text-lg font-medium">In-App Alerts</h3>
+          {rows(IN_APP_ROWS)}
+          <p className="mt-4 text-xs text-muted-foreground">
+            Alerts appear in the bell in the header. Read alerts are cleared
+            automatically after 30 days.
+          </p>
         </div>
       </CardContent>
     </Card>
